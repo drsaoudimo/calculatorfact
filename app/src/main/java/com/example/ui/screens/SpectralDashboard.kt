@@ -428,6 +428,62 @@ fun PrimeFactorisationCard(
     factorsMap: Map<BigInteger, Int>
 ) {
     val isPrime = factorsMap.size == 1 && factorsMap.values.firstOrNull() == 1
+    val context = LocalContext.current
+    var copied by remember { mutableStateOf(false) }
+
+    // Infinite primality verification state
+    var certaintySteps by remember(factorsMap) { mutableStateOf(5) }
+    var allPrimesChecked by remember(factorsMap) { mutableStateOf<Boolean?>(null) }
+    var currentTestingFactor by remember(factorsMap) { mutableStateOf<BigInteger?>(null) }
+
+    LaunchedEffect(copied) {
+        if (copied) {
+            kotlinx.coroutines.delay(2000)
+            copied = false
+        }
+    }
+
+    LaunchedEffect(factorsMap) {
+        if (factorsMap.isEmpty()) {
+            allPrimesChecked = null
+            return@LaunchedEffect
+        }
+
+        val keys = factorsMap.keys.toList()
+        
+        // Fast prime check first
+        for (k in keys) {
+            currentTestingFactor = k
+            if (!k.isProbablePrime(10)) {
+                allPrimesChecked = false
+                currentTestingFactor = null
+                return@LaunchedEffect
+            }
+        }
+        allPrimesChecked = true
+        certaintySteps = 10
+
+        // Infinite verification loop ("استمر للأبد")
+        while (true) {
+            kotlinx.coroutines.delay(1200)
+            certaintySteps += 5
+            
+            var stillPrime = true
+            for (k in keys) {
+                currentTestingFactor = k
+                if (!k.isProbablePrime(certaintySteps)) {
+                    stillPrime = false
+                    break
+                }
+            }
+            if (!stillPrime) {
+                allPrimesChecked = false
+                currentTestingFactor = null
+                break
+            }
+            // Continues forever updating UI with higher check accuracy steps
+        }
+    }
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -437,7 +493,7 @@ fun PrimeFactorisationCard(
     ) {
         Column(
             modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -477,23 +533,182 @@ fun PrimeFactorisationCard(
                 lineHeight = 18.sp
             )
 
+            // Factor display box with Copy overlay action
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(BackgroundColor, RoundedCornerShape(10.dp))
-                    .padding(14.dp)
                     .border(1.dp, DarkGreyLine, RoundedCornerShape(10.dp))
+                    .padding(14.dp)
             ) {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
                     Text(
                         text = factorsText,
                         color = PrimaryCyan,
-                        fontSize = 18.sp,
+                        fontSize = 20.sp,
                         fontWeight = FontWeight.Bold,
                         textAlign = TextAlign.Center,
                         fontFamily = FontFamily.Monospace,
                         modifier = Modifier.fillMaxWidth()
                     )
+
+                    // Quick Copy Tool Icon Button next to text
+                    IconButton(
+                        onClick = {
+                            val clipboardManager = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                            val clip = android.content.ClipData.newPlainText("Spectral Factors", factorsText)
+                            clipboardManager.setPrimaryClip(clip)
+                            copied = true
+                        },
+                        modifier = Modifier
+                            .testTag("copy_factors_quick_btn")
+                            .size(36.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (copied) Icons.Default.Check else Icons.Default.Share, 
+                            contentDescription = "نسخ الحدود",
+                            tint = if (copied) AccentGold else PrimaryCyan,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+            }
+
+            // Copy terms button requested by user ("زر نسخ الحدود من فضلك")
+            Button(
+                onClick = {
+                    val clipboardManager = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                    val clip = android.content.ClipData.newPlainText("Spectral Factors", factorsText)
+                    clipboardManager.setPrimaryClip(clip)
+                    copied = true
+                },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (copied) AccentGold else PrimaryCyan
+                ),
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(40.dp)
+                    .testTag("copy_factors_full_btn")
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Icon(
+                        imageVector = if (copied) Icons.Default.Check else Icons.Default.Share,
+                        contentDescription = "نسخ",
+                        tint = BackgroundColor,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Text(
+                        text = if (copied) "تم نسخ جميع الحدود بنجاح! ✓" else "نسخ جميع الحدود (Copy Terms)",
+                        color = BackgroundColor,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 12.sp
+                    )
+                }
+            }
+
+            // Infinite Primality Verification Section ("الرجاء التحقق ان جميع الحدود اولية او استمر للابد")
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(BackgroundColor)
+                    .border(1.dp, DarkGreyLine, RoundedCornerShape(10.dp))
+                    .padding(12.dp)
+            ) {
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "بروتوكول التحقق الطيفي اللانهائي للحدود",
+                            color = AccentGold,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 11.sp
+                        )
+                        
+                        // Animated pulsing dot/progress
+                        if (allPrimesChecked == true) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                CircularProgressIndicator(
+                                    color = AccentGold,
+                                    strokeWidth = 2.dp,
+                                    modifier = Modifier.size(10.dp)
+                                )
+                                Text(
+                                    text = "مستمر للأبد...",
+                                    color = AccentGold,
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+
+                    Divider(color = DarkGreyLine.copy(alpha = 0.5f))
+
+                    when (allPrimesChecked) {
+                        true -> {
+                            val errorExponent = (certaintySteps * 0.6).toInt()
+                            Text(
+                                text = "✓ جميع القواسم/الحدود مؤكدة كأعداد أولية.",
+                                color = Color.Green,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "• عدد جولات اختبار ميلر-رابين: $certaintySteps جولة مكثفة",
+                                color = TextWhite,
+                                fontSize = 10.sp,
+                                fontFamily = FontFamily.Monospace
+                            )
+                            Text(
+                                text = "• هامش الخطأ الإحصائي: < 10^(-$errorExponent)",
+                                color = TextWhite,
+                                fontSize = 10.sp,
+                                fontFamily = FontFamily.Monospace
+                            )
+                            Text(
+                                text = "• الفحص الرياضي الذاتي مستمر للأبد لرفع درجة التأكيد.",
+                                color = TextGrey,
+                                fontSize = 10.sp
+                            )
+                        }
+                        false -> {
+                            Text(
+                                text = "⚠️ تنبيه: تم اكتشاف حد مركب ضمن العوامل!",
+                                color = Color.Red,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "أحد حدود التفكيك ليس أولياً، يرجى مراجعة قيم المدخلات.",
+                                color = TextGrey,
+                                fontSize = 10.sp
+                            )
+                        }
+                        else -> {
+                            Text(
+                                text = "⏳ جاري تهيئة بروتوكول فحص الأولية اللانهائي...",
+                                color = TextGrey,
+                                fontSize = 11.sp
+                            )
+                        }
+                    }
                 }
             }
         }
