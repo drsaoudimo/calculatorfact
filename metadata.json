@@ -1,0 +1,6 @@
+{
+  "name": "SFI Spectral Lab",
+  "description": "Spectral Factorization Inversion (SFI) & Matrix Energetic Prime Analysis (MEPA) research sandbox with real-time eigenvalue modeling, spectral invariants, and AI-powered topological homological explanations.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
