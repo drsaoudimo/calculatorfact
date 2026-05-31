@@ -2,14 +2,18 @@ package com.example.db
 
 import kotlinx.coroutines.flow.Flow
 
-class SpectralRepository(private val dao: SpectralDao) {
-    val allRecords: Flow<List<SpectralRecord>> = dao.getAllRecords()
+class SpectralRepository(private val spectralDao: SpectralDao) {
+    val allRecords: Flow<List<SpectralRecord>> = spectralDao.getAllRecordsFlow()
 
-    suspend fun insertRecord(record: SpectralRecord) {
-        dao.insertRecord(record)
+    suspend fun insert(record: SpectralRecord): Long {
+        return spectralDao.insertRecord(record)
+    }
+
+    suspend fun delete(record: SpectralRecord) {
+        spectralDao.deleteRecord(record)
     }
 
     suspend fun clearAll() {
-        dao.clearAll()
+        spectralDao.clearAllRecords()
     }
 }

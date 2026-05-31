@@ -1,78 +1,193 @@
 package com.example.viewmodel
 
-import androidx.lifecycle.ViewModel
-import androidx.lifecycle.ViewModelProvider
+import android.app.Application
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.api.GeminiClient
+import com.example.db.AppDatabase
 import com.example.db.SpectralRecord
 import com.example.db.SpectralRepository
-import com.example.math.RowRepresentativeMode
+import com.example.math.MepaResults
 import com.example.math.SDIMath
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.math.BigInteger
 
+enum class RowRepresentativeMode {
+    EIGEN_COSINE,
+    GCD_MODULO,
+    HOMOLOGICAL_BETTI
+}
+
 data class SpectralUiState(
-    val inputN: String = "220",
-    val selectedMode: RowRepresentativeMode = RowRepresentativeMode.PRIMES,
+    val inputN: String = "909249334023",
     val isLoading: Boolean = false,
-    val error: String? = null,
-    
-    // Calculated numerical outputs
-    val activeN: BigInteger? = null,
-    val primeFactors: Map<BigInteger, Int> = emptyMap(),
+    val factors: Map<BigInteger, Int> = emptyMap(),
     val factorsText: String = "",
-    val currentSpectrum: DoubleArray = DoubleArray(6),
-    val baselineSpectrum: DoubleArray = DoubleArray(6),
-    val visibilityMetric: Double = 0.0,
-    val isOpacityTriggered: Boolean = false,
-    val semiprimeAnalysis: SDIMath.SemiprimeAnalysis? = null,
-    
-    // AI Explanations
-    val isAiLoading: Boolean = false,
-    val aiExplanation: String = "",
-    
-    // Local persistence history
-    val inspectionHistory: List<SpectralRecord> = emptyList()
+    val mepaResults: MepaResults? = null,
+    val selectedMode: RowRepresentativeMode = RowRepresentativeMode.EIGEN_COSINE,
+    val academicReport: String = "",
+    val error: String? = null
 )
 
-class SpectralViewModel(private val repository: SpectralRepository) : ViewModel() {
+class SpectralViewModel(application: Application) : AndroidViewModel(application) {
 
+    private val repository: SpectralRepository
     private val _uiState = MutableStateFlow(SpectralUiState())
     val uiState: StateFlow<SpectralUiState> = _uiState.asStateFlow()
 
     init {
-        // Collect local history reactively from repository
-        viewModelScope.launch {
-            repository.allRecords.collect { records ->
-                _uiState.update { it.copy(inspectionHistory = records) }
-            }
-        }
-        
-        // Initial run with default N
-        calculateSpectralAttributes(_uiState.value.inputN)
+        val database = AppDatabase.getDatabase(application)
+        repository = SpectralRepository(database.spectralDao())
     }
 
-    fun updateInput(newInput: String) {
-        _uiState.update { it.copy(inputN = newInput, error = null) }
+    // Connect to Room Database Flow
+    val historyLog: StateFlow<List<SpectralRecord>> = repository.allRecords
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptyList()
+        )
+
+    fun updateInput(newVal: String) {
+        _uiState.update { it.copy(inputN = newVal, error = null) }
     }
 
     fun updateMode(mode: RowRepresentativeMode) {
         _uiState.update { it.copy(selectedMode = mode) }
-        calculateSpectralAttributes(_uiState.value.inputN)
     }
 
-    fun executeSpectralAnalysis(customInput: String? = null) {
-        if (customInput != null) {
-            _uiState.update { it.copy(inputN = customInput) }
+    fun deleteHistoryRecord(record: SpectralRecord) {
+        viewModelScope.launch {
+            repository.delete(record)
         }
-        calculateSpectralAttributes(_uiState.value.inputN)
     }
 
+    fun clearAllHistory() {
+        viewModelScope.launch {
+            repository.clearAll()
+        }
+    }
+
+    /**
+     * Executes spectral analysis and recursively breaks down composite factors using AI.
+     */
+    fun executeSpectralAnalysis(inputStr: String) {
+        viewModelScope.launch {
+            val sanitized = sanitizeInput(inputStr)
+            if (sanitized.isEmpty()) {
+                _uiState.update { it.copy(error = "الرجاء إدخال رقم صحيح صالح للتحليل.") }
+                return@launch
+            }
+
+            _uiState.update { it.copy(isLoading = true, error = null, academicReport = "") }
+
+            try {
+                val nVal = BigInteger(sanitized)
+                if (nVal <= BigInteger.ONE) {
+                    _uiState.update {
+                        it.copy(
+                            isLoading = false,
+                            error = "العدد يجب أن يكون أكبر من 1 للتحليل الطيفي."
+                        )
+                    }
+                    return@launch
+                }
+
+                // 1. Initial High-speed prime factorization
+                var factors = SDIMath.factorise(nVal)
+
+                // 2. Continuous Decomposer for non-prime limits / composite factors ("عند اكتشاف حد غير اولي الرجاء الاستمرار في تحليله")
+                var hasComposite = factors.keys.any { !it.isProbablePrime(25) }
+                var aiDecomposeAttempts = 0
+                val maxAttempts = 5 // safety cap
+
+                while (hasComposite && aiDecomposeAttempts < maxAttempts) {
+                    aiDecomposeAttempts++
+                    // Identify the non-prime factor
+                    val compositeFactor = factors.keys.first { !it.isProbablePrime(25) }
+                    
+                    // Utilize Gemini to break down this composite sub-factor
+                    val aiResolvedFactors = GeminiClient.factorizeWithGemini(compositeFactor)
+                    if (aiResolvedFactors != null) {
+                        val (p1, p2) = aiResolvedFactors
+                        SDIMath.registerDynamicFactorization(compositeFactor, p1, p2)
+                        
+                        // Recalculate whole product factors with newly discovered sub-factors
+                        factors = SDIMath.factorise(nVal)
+                    } else {
+                        // AI could not break this limit down; log error or break retry loop
+                        break
+                    }
+                    hasComposite = factors.keys.any { !it.isProbablePrime(25) }
+                }
+
+                val factorsStr = SDIMath.factorsToString(factors)
+
+                // 3. Compute diagnostic energetic matrices
+                val mepa = SDIMath.computeMepaDiagnostics(factors)
+
+                // 4. Generate scholarly Homology / TDA analysis from Gemini
+                val academicReport = GeminiClient.generateAcademicAnalysis(
+                    valueN = nVal,
+                    factorsText = factorsStr,
+                    determinant = mepa.relationMatrix.firstOrNull()?.sum() ?: 0.0,
+                    frobeniusNorm = mepa.frobeniusNorm,
+                    b0 = mepa.betti0,
+                    b1 = mepa.betti1,
+                    b2 = mepa.betti2
+                )
+
+                _uiState.update {
+                    it.copy(
+                        isLoading = false,
+                        factors = factors,
+                        factorsText = factorsStr,
+                        mepaResults = mepa,
+                        academicReport = academicReport
+                    )
+                }
+
+                // Save to Room for offline sandbox tracking
+                repository.insert(
+                    SpectralRecord(
+                        inputN = nVal.toString(),
+                        factorsText = factorsStr,
+                        frobeniusNorm = mepa.frobeniusNorm,
+                        dimension = mepa.dimension,
+                        betti0 = mepa.betti0,
+                        betti1 = mepa.betti1,
+                        betti2 = mepa.betti2,
+                        academicBriefing = academicReport
+                    )
+                )
+
+            } catch (e: NumberFormatException) {
+                _uiState.update {
+                    it.copy(
+                        isLoading = false,
+                        error = "عذراً، المدخلات ليست رقماً صالحاً ذو قيم صحيحة للتحليل."
+                    )
+                }
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(
+                        isLoading = false,
+                        error = "حدث خطأ غير متوقع: ${e.localizedMessage}"
+                    )
+                }
+            }
+        }
+    }
+
+    /**
+     * Custom manual register of factors for manual overrides or matching values.
+     */
     fun registerManualFactors(nStr: String, p1Str: String, p2Str: String) {
         val sanitizedN = sanitizeInput(nStr)
         val sanitizedP1 = sanitizeInput(p1Str)
@@ -81,10 +196,11 @@ class SpectralViewModel(private val repository: SpectralRepository) : ViewModel(
             val nVal = BigInteger(sanitizedN)
             val p1Val = BigInteger(sanitizedP1)
             val p2Val = BigInteger(sanitizedP2)
+            
             if (p1Val.multiply(p2Val) == nVal) {
                 SDIMath.registerDynamicFactorization(nVal, p1Val, p2Val)
                 _uiState.update { it.copy(inputN = nStr) }
-                calculateSpectralAttributes(nStr)
+                executeSpectralAnalysis(nStr)
             } else {
                 _uiState.update { it.copy(error = "تنبيه: حاصل ضرب العاملين لا يساوي العدد الهدف N!") }
             }
@@ -99,141 +215,6 @@ class SpectralViewModel(private val repository: SpectralRepository) : ViewModel(
         for (i in 0..9) {
             sanitized = sanitized.replace(arabicDigits[i], '0' + i)
         }
-        return sanitized
-    }
-
-    private fun calculateSpectralAttributes(inputString: String) {
-        viewModelScope.launch(Dispatchers.Default) {
-            _uiState.update { it.copy(isLoading = true, error = null) }
-            
-            val sanitized = sanitizeInput(inputString)
-            val nVal = try {
-                BigInteger(sanitized)
-            } catch (e: Exception) {
-                null
-            }
-            
-            if (nVal == null || nVal <= BigInteger.ZERO) {
-                _uiState.update { 
-                    it.copy(
-                        isLoading = false, 
-                        error = "الرجاء إدخال عدد طبيعي صحيح موجب أكبر من الصفر"
-                    ) 
-                }
-                return@launch
-            }
-
-            // High-speed prime factorization
-            var factors = SDIMath.factorise(nVal)
-
-            // Dynamic AI Factorization for extremely large composites / semiprimes
-            val isCompositeButUnfactored = nVal.isProbablePrime(25) == false && (factors.size == 1 && factors.containsKey(nVal))
-            if (isCompositeButUnfactored) {
-                val aiFactors = com.example.api.GeminiClient.factorizeWithGemini(nVal)
-                if (aiFactors != null) {
-                    SDIMath.registerDynamicFactorization(nVal, aiFactors.first, aiFactors.second)
-                    factors = SDIMath.factorise(nVal)
-                }
-            }
-
-            val factorsStr = SDIMath.factorsToString(factors)
-
-            // Diagnostic matrices computation
-            val mode = _uiState.value.selectedMode
-            val dn = SDIMath.computeDN(nVal, mode)
-            val hn = SDIMath.computeHN(dn)
-            val spectrum = SDIMath.computeEigenvalues(hn)
-
-            // Baseline matrix (coprime / fully opaque N reference)
-            val baseDn = DoubleArray(19) { 1.0 }
-            val baseHn = SDIMath.computeHN(baseDn)
-            val baselineSpectrum = SDIMath.computeEigenvalues(baseHn)
-
-            // Visibility Metric and complete Opacity boundary triggers
-            val visibility = SDIMath.computeSpectralVisibility(spectrum, baselineSpectrum)
-            val isOpacityTriggered = SDIMath.isSpectralOpacityTriggered(nVal)
-
-            // Robust math solver representation for semiprimes/composites
-            val semiprime = SDIMath.analyzeSemiprime(nVal, mode)
-
-            _uiState.update {
-                it.copy(
-                    isLoading = false,
-                    activeN = nVal,
-                    primeFactors = factors,
-                    factorsText = factorsStr,
-                    currentSpectrum = spectrum,
-                    baselineSpectrum = baselineSpectrum,
-                    visibilityMetric = visibility,
-                    isOpacityTriggered = isOpacityTriggered,
-                    semiprimeAnalysis = semiprime,
-                    aiExplanation = "" // Reset explanation when new N is analyzed
-                )
-            }
-
-            // Save trace records safely inside database
-            val record = SpectralRecord(
-                valueN = nVal.toString(),
-                factorsText = factorsStr,
-                spectrumText = spectrum.joinToString(",") { String.format("%.2f", it) },
-                visibilityMetric = visibility,
-                isOpacityTriggered = isOpacityTriggered
-            )
-            repository.insertRecord(record)
-        }
-    }
-
-    fun requestAiInsight() {
-        val state = _uiState.value
-        val activeNVal = state.activeN ?: return
-
-        viewModelScope.launch {
-            _uiState.update { it.copy(isAiLoading = true) }
-            
-            val summaryText = GeminiClient.generateAcademicAnalysis(
-                valueN = activeNVal,
-                factorsText = state.factorsText,
-                spectrum = state.currentSpectrum,
-                opacitySpectrum = state.baselineSpectrum,
-                visibility = state.visibilityMetric,
-                isOpacityTriggered = state.isOpacityTriggered,
-                modeName = state.selectedMode.name
-            )
-
-            _uiState.update {
-                it.copy(
-                    isAiLoading = false,
-                    aiExplanation = summaryText
-                )
-            }
-        }
-    }
-
-    fun loadFromHistory(record: SpectralRecord) {
-        val mode = _uiState.value.selectedMode
-        _uiState.update {
-            it.copy(
-                inputN = record.valueN,
-                selectedMode = mode,
-                aiExplanation = ""
-            )
-        }
-        calculateSpectralAttributes(record.valueN)
-    }
-
-    fun clearHistory() {
-        viewModelScope.launch {
-            repository.clearAll()
-        }
-    }
-}
-
-class SpectralViewModelFactory(private val repository: SpectralRepository) : ViewModelProvider.Factory {
-    override fun <T : ViewModel> create(modelClass: Class<T>): T {
-        if (modelClass.isAssignableFrom(SpectralViewModel::class.java)) {
-            @Suppress("UNCHECKED_CAST")
-            return SpectralViewModel(repository) as T
-        }
-        throw IllegalArgumentException("Unknown ViewModel class")
+        return sanitized.trim()
     }
 }

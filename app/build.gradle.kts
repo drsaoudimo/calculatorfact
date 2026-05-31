@@ -1,8 +1,8 @@
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
-    alias(libs.plugins.ksp)
     alias(libs.plugins.kotlin.serialization)
+    alias(libs.plugins.ksp)
 }
 
 android {
@@ -20,6 +20,23 @@ android {
         vectorDrawables {
             useSupportLibrary = true
         }
+
+        // Native injection of GEMINI_API_KEY with auto-fallback to build environment or local .env
+        var geminiApiKey = System.getenv("GEMINI_API_KEY") ?: ""
+        if (geminiApiKey.isEmpty()) {
+            val envFile = project.file("../.env")
+            if (envFile.exists()) {
+                envFile.readLines().forEach { line ->
+                    if (line.trim().startsWith("GEMINI_API_KEY=")) {
+                        geminiApiKey = line.substringAfter("GEMINI_API_KEY=").trim()
+                    }
+                }
+            }
+        }
+        if (geminiApiKey.isEmpty()) {
+            geminiApiKey = "PLACEHOLDER_KEY"
+        }
+        buildConfigField("String", "GEMINI_API_KEY", "\"$geminiApiKey\"")
     }
 
     buildTypes {
@@ -43,7 +60,7 @@ android {
         buildConfig = true
     }
     composeOptions {
-        kotlinCompilerExtensionVersion = "1.5.14"
+        kotlinCompilerExtensionVersion = "1.5.8"
     }
     packaging {
         resources {
@@ -55,35 +72,33 @@ android {
 dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
-    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.1")
+    implementation(libs.androidx.lifecycle.viewmodel.compose)
+    implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.activity.compose)
+    
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.ui.graphics)
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
-    
-    // Room Database
+    implementation(libs.androidx.compose.material.icons.extended)
+
+    // Room
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)
     ksp(libs.androidx.room.compiler)
-    
-    // Navigation
-    implementation(libs.androidx.navigation.compose)
-    
-    // Serialization
-    implementation(libs.kotlinx.serialization.json)
-    
+
     // Retrofit & Networking
     implementation(libs.retrofit)
+    implementation(libs.retrofit.converter.serialization)
     implementation(libs.retrofit.converter.gson)
-    implementation(libs.okhttp.logging.interceptor)
-    
+    implementation(libs.okhttp)
+    implementation(libs.okhttp.logging)
+    implementation(libs.kotlinx.serialization.json)
+    implementation(libs.gson)
+
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(platform(libs.androidx.compose.bom))
-    androidTestImplementation(libs.androidx.compose.ui.test.junit4)
-    debugImplementation(libs.androidx.compose.ui.tooling)
-    debugImplementation(libs.androidx.compose.ui.test.manifest)
 }

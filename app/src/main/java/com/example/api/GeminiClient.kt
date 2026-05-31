@@ -1,20 +1,25 @@
 package com.example.api
 
 import android.util.Log
-import com.google.gson.annotations.SerializedName
+import com.example.BuildConfig
+import com.google.gson.Gson
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.http.Body
 import retrofit2.http.POST
 import retrofit2.http.Query
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import java.math.BigInteger
+import java.util.concurrent.TimeUnit
+
+// --- Direct REST API Data Models for Gemini in Plain Kotlin (Gson) ---
 
 data class GenerateContentRequest(
     val contents: List<Content>,
-    val generationConfig: GenerationConfig? = null
+    val generationConfig: GenerationConfig? = null,
+    val systemInstruction: Content? = null
 )
 
 data class Content(
@@ -26,7 +31,10 @@ data class Part(
 )
 
 data class GenerationConfig(
-    val temperature: Float? = null
+    val temperature: Float? = null,
+    val topP: Float? = null,
+    val topK: Int? = null,
+    val responseMimeType: String? = null
 )
 
 data class GenerateContentResponse(
@@ -34,8 +42,10 @@ data class GenerateContentResponse(
 )
 
 data class Candidate(
-    val content: Content
+    val content: Content? = null
 )
+
+// --- Retrofit Service Interfaces ---
 
 interface GeminiApiService {
     @POST("v1beta/models/gemini-3.5-flash:generateContent")
@@ -49,9 +59,9 @@ object RetrofitClient {
     private const val BASE_URL = "https://generativelanguage.googleapis.com/"
 
     private val okHttpClient = OkHttpClient.Builder()
-        .connectTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
-        .readTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
-        .writeTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
+        .connectTimeout(60, TimeUnit.SECONDS)
+        .readTimeout(60, TimeUnit.SECONDS)
+        .writeTimeout(60, TimeUnit.SECONDS)
         .build()
 
     val service: GeminiApiService by lazy {
@@ -68,45 +78,39 @@ object GeminiClient {
     private const val TAG = "GeminiClient"
 
     private fun getApiKey(): String {
-        return try {
-            val clazz = Class.forName("com.example.BuildConfig")
-            val field = clazz.getField("GEMINI_API_KEY")
-            field.get(null) as? String ?: ""
-        } catch (e: Exception) {
-            ""
-        }
+        val key = BuildConfig.GEMINI_API_KEY
+        return if (key == "PLACEHOLDER_KEY" || key.isEmpty()) "" else key
     }
 
+    /**
+     * Attempts to factorize a composite number N into two factors using Gemini's mathematical indexing.
+     */
     suspend fun factorizeWithGemini(nVal: BigInteger): Pair<BigInteger, BigInteger>? = withContext(Dispatchers.IO) {
         val key = getApiKey()
         if (key.isEmpty()) return@withContext null
 
         val prompt = """
-            You are a supercomputer prime factorization service and expert mathematician.
-            Factorize the following semiprime number N into its two prime factors p1 and p2:
+            You are an advanced computational math solver.
+            Your job is to factorize the composite number N into two non-trivial factors p1 and p2 such that p1 * p2 = N.
             N = $nVal
             
-            Respond strictly in valid JSON format. Do not write any markdown code block indicators, backticks, or conversational text. Your response must be parsed directly as a JSON object of this exact structure:
+            Respond strictly in valid JSON format. Do not use block-backticks or conversational text. Return exactly this JSON structure:
             {
                "success": true,
-               "p1": "factor1",
-               "p2": "factor2"
+               "p1": "value_of_p1",
+               "p2": "value_of_p2"
             }
-            If you do not know the factorization or cannot find it, write:
-            {
-               "success": false
-            }
+            If you cannot find the factors, return {"success": false}. Ensure p1 * p2 = N exactly.
         """.trimIndent()
 
         try {
             val request = GenerateContentRequest(
                 contents = listOf(Content(parts = listOf(Part(text = prompt)))),
-                generationConfig = GenerationConfig(temperature = 0.0f)
+                generationConfig = GenerationConfig(temperature = 0.0f, responseMimeType = "application/json")
             )
             val response = RetrofitClient.service.generateContent(apiKey = key, request = request)
             var text = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text ?: ""
             
-            // Clean markdown blocks if present
             text = text.trim()
             if (text.startsWith("```")) {
                 text = text.removePrefix("```json").removePrefix("```")
@@ -116,13 +120,13 @@ object GeminiClient {
                 text = text.trim()
             }
             
-            val jsonObject = com.google.gson.JsonParser.parseString(text).asJsonObject
-            val success = jsonObject.get("success")?.asBoolean ?: false
-            if (success) {
-                val p1Str = jsonObject.get("p1")?.asString ?: ""
-                val p2Str = jsonObject.get("p2")?.asString ?: ""
-                if (p1Str.isNotEmpty() && p2Str.isNotEmpty()) {
-                    Pair(BigInteger(p1Str), BigInteger(p2Str))
+            val gson = Gson()
+            val parsed = gson.fromJson(text, GeminiFactorizationResponse::class.java)
+            if (parsed.success) {
+                val p1 = BigInteger(parsed.p1.trim())
+                val p2 = BigInteger(parsed.p2.trim())
+                if (p1.multiply(p2) == nVal) {
+                    Pair(p1, p2)
                 } else null
             } else null
         } catch (e: Exception) {
@@ -131,42 +135,37 @@ object GeminiClient {
         }
     }
 
+    /**
+     * Generates a comprehensive research article / educational briefing on SFI & MEPA
+     */
     suspend fun generateAcademicAnalysis(
         valueN: BigInteger,
         factorsText: String,
-        spectrum: DoubleArray,
-        opacitySpectrum: DoubleArray,
-        visibility: Double,
-        isOpacityTriggered: Boolean,
-        modeName: String
+        determinant: Double,
+        frobeniusNorm: Double,
+        b0: Int,
+        b1: Int,
+        b2: Int
     ): String = withContext(Dispatchers.IO) {
         val key = getApiKey()
         if (key.isEmpty()) {
-            return@withContext "💡 [تنويه: مفتاح واجهة برمجة تطبيقات Gemini API غير مهيأ حالياً. لاستقبال تحليل ذكي تفصيلي مدعوم بالكامل بواسطة نماذج الذكاء الاصطناعي، يرجى تزويد مفتاح API الخاص بك في إعدادات التطبيق أو عبر لوحة الأسرار.]\n\nنظرة سريعة على النتائج المختبرية:\n• العدد المدروس: $valueN\n• العوامل الأولية: $factorsText\n• خريطة الترشيح: $modeName\n• مسافة الرؤية الطيفية: ${String.format("%.4f", visibility)}\n• حالة العتمة: ${if (isOpacityTriggered) "مفعلة (العدد أولي تماماً)" else "غير مفعلة"}"
+            return@withContext "خطأ: لم يتم تهيئة مفتاح API الخاص بـ Gemini. يرجى توجيهه عبر حقول لوحة الأسرار AI Studio للتثبيت الآمن."
         }
 
         val prompt = """
-            أنت بروفيسور عالم خبير وأكاديمي مرموق في الرياضيات الرقمية، نظرية الأعداد الحسابية (Computational Number Theory)، وطوبولوجيا البيانات الجبرية (TDA).
-            نحن ندرس مشروع "التحليل الأولي عبر الانعكاس الطيفي" (Spectral Factorization Inversion - SFI) القائم على إطار "تحليل طاقة مصفوفة الأعداد الأولية" (Matrix Energetic Prime Analysis - MEPA)، ونموذج مؤثر الإسقاط القاسمي H_N:
-            H_N = A1ᵀ * diag(gcd(N, a_k)) * A1
+            Write a detailed, formal scientific analysis in Arabic of the composite numerical system represented by N:
             
-            لقد قمنا بتحليل طيف وقواسم العدد الطبيعي N = $valueN تحت تمثيل مصفوفة القيادة المرجعية الكثيفة قاسمياً A1 (قياس 19x6):
-            إليك التفاصيل المختبرية والقياسات الحالية للحالة المدروسة:
-            - العدد الصحيح المدروس N = $valueN
-            - تفكيك عومله الأولية الفريد: $factorsText
-            - خريطة اختيار الممثل لقواسم صفوف A1 المرجعية: $modeName
-            - قيم طيف المؤشر σ(H_N) الحالي (القيم الذاتية الستة): [${spectrum.joinToString(", ") { String.format("%.2f", it) }}]
-            - طيف عتمة خط الأساس المرجعي σ(A1ᵀ * A1): [${opacitySpectrum.joinToString(", ") { String.format("%.2f", it) }}]
-            - مسافة رؤية التقارب الطيفي (Visibility Metric): ${String.format("%.4f", visibility)}
-            - رصد حالة العتمة الطيفية بالكامل (كامل المنطقة العمياء): ${if (isOpacityTriggered) "نعم تفعيل كامل (العدد أولي تماماً مع معايير A1)" else "لا يوجد عتمة كاملة"}
+            - Number N: $valueN
+            - Prime/Decomposition Factors: $factorsText
+            - Matrix Invariants (MEPA Model): Frobenius Norm = $frobeniusNorm, Trace Matrix Sum = $determinant
+            - Topological Betti Homology: B0 = $b0, B1 = $b1, B2 = $b2
             
-            بإشراف المنهجية الموثوقة لـ SFI و MEPA، يرجى صياغة تقرير أكاديمي فائق الدقة ومكتوب بلغة بحثية رصينة ومتقنة تليق بمؤتمر رياضيات دولي، يغطي ما يلي:
-            1. قراءة البصمة الطيفية لـ $valueN وكيف يعكس مؤثر الإسقاط القاسمي H_N حالته الطاقوية وتفكيكه الأولي الفريد.
-            2. كيف تساهم "استراتيجية الثوابت الطيفية" (الأثر Tr والتحويل اللوغاريتمي ومحدد المصفوفة) في فك عقدة اللاخطية الجبرية لاستعادة العوامل الأولية بفعالية.
-            3. تفصيل مبرهنة استرجاع العوامل بكفاءة O(log N) مقارنة بالخوارزميات التقليدية ذات التعقيد الأسي.
-            4. تأويل طوبولوجي عميق للتداخل الفراغي: ربط التحويل الذكي للنصوص والدلالات الهندسية بأرقام بيتي (Betti Numbers)، والمطابقة الهيكلية بين الأشكال والمفاهيم المجردة لتفسير رنين الأعداد الطيفي.
-            
-            اكتب الرد بلغة عربية رسمية فخمة، علمية، خالية تماماً من الحشو والعبارات التعبيرية العامة، وركز بنسبة 100% على الصياغة الرياضية الدقيقة للتقارير المعملية المتينة!
+            Incorporate elements of Computational Topology, Semantic Text Analysis, and Betti group maps (B0, B1, B2) as discussed in the Topological Data Analysis (TDA) theoretical framework. Explain how numerical structures correspond to stable semantic manifolds in modern Natural Language Processing (NLP). 
+            Write in a rich, academic, and highly professional Arabian scholarly style (اللغة العربية الأكاديمية الرصينة). Do not use conversational filler, write it as a formatted research memo with sections:
+            1. التحليل البنيوي الدلالي (Structural Semantic Analysis)
+            2. الفضاءات المترية والتحول الذكي للنصوص (Metric Spaces & Smart NLP Homology)
+            3. التماثل الهومولوجي للمصفوفات الطيفية (Homological Isomorphism of Spectral Matrices)
+            4. التوجيهات الرياضية المستقبلية (Academic Micro-Directives)
         """.trimIndent()
 
         try {
@@ -175,11 +174,16 @@ object GeminiClient {
                 generationConfig = GenerationConfig(temperature = 0.2f)
             )
             val response = RetrofitClient.service.generateContent(apiKey = key, request = request)
-            response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
-                ?: "عذراً، لم نتمكن من الحصول على استجابة طيفية من الخادم."
+            response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text 
+                ?: "عذراً، لم تنجح الاستجابة الرياضية من المخدم حالياً."
         } catch (e: Exception) {
-            Log.e(TAG, "Error generating AI academic interpretation", e)
-            "حدث خطأ أثناء إجراء التحليل الرياضي الذكي: ${e.localizedMessage}"
+            "فشل استقصاء التحليل العلمي: ${e.message}"
         }
     }
 }
+
+data class GeminiFactorizationResponse(
+    val success: Boolean,
+    val p1: String = "",
+    val p2: String = ""
+)
