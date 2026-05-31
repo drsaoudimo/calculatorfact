@@ -1,12 +1,14 @@
 package com.example.ui.screens
 
 import androidx.compose.animation.*
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -15,9 +17,10 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -25,332 +28,125 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.db.SpectralRecord
 import com.example.math.RowRepresentativeMode
 import com.example.math.SDIMath
-import com.example.ui.theme.*
-import com.example.viewmodel.SpectralUiState
 import com.example.viewmodel.SpectralViewModel
-import java.util.*
-import kotlin.math.max
+import java.math.BigInteger
 
-@OptIn(ExperimentalMaterial3Api::class)
+// Color Tokens definition
+private val BackgroundColor = Color(0xFF090D15)
+private val SurfaceCardColor = Color(0xFF111827)
+private val PrimaryCyan = Color(0xFF00E5FF)
+private val AccentGold = Color(0xFFFFC107)
+private val TextWhite = Color(0xFFF1F5F9)
+private val TextGrey = Color(0xFF94A3B8)
+private val DarkGreyLine = Color(0xFF1F2937)
+
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun SpectralDashboard(
     viewModel: SpectralViewModel,
     modifier: Modifier = Modifier
 ) {
-    val uiState by viewModel.uiState.collectAsState()
-    val history by viewModel.historyList.collectAsState()
-    var displayLanguageIsAr by remember { mutableStateOf(true) }
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    var inputTemp by remember { mutableStateOf(uiState.inputN) }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = {
-                    Column {
-                        Text(
-                            text = if (displayLanguageIsAr) "رنين الأعداد الطيفي (SFI)" else "SFI Spectral Lab",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                        Text(
-                            text = if (displayLanguageIsAr) "التحليل الأولي عبر الانعكاس الطيفي و MEPA" else "Spectral Factorization Inversion & MEPA",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = SoftGrayText
-                        )
-                    }
-                },
-                actions = {
-                    IconButton(
-                        onClick = { displayLanguageIsAr = !displayLanguageIsAr },
-                        modifier = Modifier.testTag("lang_toggle_button")
-                    ) {
-                        Surface(
-                            shape = RoundedCornerShape(4.dp),
-                            color = Color(0xFF1E2833),
-                            modifier = Modifier.padding(horizontal = 4.dp)
-                        ) {
-                            Text(
-                                text = if (displayLanguageIsAr) "EN" else "عربي",
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = ElectricTeal
-                            )
-                        }
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = SlateDarkBackground,
-                    titleContentColor = Color.White
-                )
-            )
-        },
-        containerColor = SlateDarkBackground,
+    // Keep UI in sync with state if state changes from history selection
+    LaunchedEffect(uiState.inputN) {
+        inputTemp = uiState.inputN
+    }
+
+    Box(
         modifier = modifier
-    ) { innerPadding ->
-        LazyColumn(
+            .fillMaxSize()
+            .background(BackgroundColor)
+    ) {
+        Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding)
-                .padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-            contentPadding = PaddingValues(bottom = 32.dp)
+                .statusBarsPadding()
+                .navigationBarsPadding()
         ) {
-            // Summary briefing card
-            item {
-                AcademicBriefingCard(displayLanguageAr = displayLanguageIsAr)
-            }
+            // High-Tech Header Section
+            AcademicHeader()
 
-            // Input parameters
-            item {
-                SpectralInputCard(
-                    uiState = uiState,
-                    onInputChange = { viewModel.updateInput(it) },
-                    onModeChange = { viewModel.selectMode(it) },
-                    onCalculate = { viewModel.triggerCalculation() },
-                    onLoadPreset = { viewModel.updateInput(it); viewModel.triggerCalculation() },
-                    displayLanguageAr = displayLanguageIsAr
-                )
-            }
-
-            // Calculations errors
-            if (uiState.error != null) {
-                item {
-                    Card(
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .border(1.dp, MaterialTheme.colorScheme.error, RoundedCornerShape(12.dp))
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(16.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            Icon(Icons.Default.Warning, contentDescription = "Error", tint = MaterialTheme.colorScheme.error)
-                            Text(
-                                text = uiState.error ?: "",
-                                color = MaterialTheme.colorScheme.onErrorContainer,
-                                style = MaterialTheme.typography.bodyMedium
-                            )
-                        }
-                    }
-                }
-            }
-
-            // Dynamic results matching user's input
-            uiState.activeN?.let { activeN ->
-                // Prime factor factorization base and exponents display
-                item {
-                    PrimeFactorisationCard(
-                        valueN = activeN,
-                        factorsText = uiState.factorsText,
-                        factorsMap = uiState.primeFactors,
-                        displayLanguageAr = displayLanguageIsAr
-                    )
-                }
-
-                // Opacity warning card (Spectral Coprime blind spot)
-                item {
-                    SpectralCouplingStatusCard(
-                        isOpacityTriggered = uiState.isOpacityTriggered,
-                        visibilityDistance = uiState.visibilityDistance,
-                        displayLanguageAr = displayLanguageIsAr
-                    )
-                }
-
-                // Spectrum line/peaks comparison canvas
-                item {
-                    SpectralChartCard(
-                        currentSpectrum = uiState.currentSpectrum,
-                        baselineSpectrum = uiState.baselineSpectrum,
-                        displayLanguageAr = displayLanguageIsAr
-                    )
-                }
-
-                // 6x6 operator spectral heatmap
-                item {
-                    OperatorSpectroscopyMatrixCard(
-                        valueN = activeN,
-                        selectedMode = uiState.selectedMode,
-                        displayLanguageAr = displayLanguageIsAr
-                    )
-                }
-
-                // Gemini Academic Report card
-                item {
-                    GeminiAcademicAnalysisCard(
-                        uiState = uiState,
-                        onRequestAiAnalysis = { viewModel.requestAiAnalysis() },
-                        displayLanguageAr = displayLanguageIsAr
-                    )
-                }
-            }
-
-            // SQLite historical Logs
-            item {
-                HistoryLogsCard(
-                    historyList = history,
-                    onSelectRecord = { viewModel.loadFromHistory(it) },
-                    onDeleteRecord = { viewModel.deleteHistoryRecord(it) },
-                    onClearHistory = { viewModel.clearHistory() },
-                    displayLanguageAr = displayLanguageIsAr
-                )
-            }
-        }
-    }
-}
-
-@Composable
-fun AcademicBriefingCard(displayLanguageAr: Boolean) {
-    var expanded by remember { mutableStateOf(true) }
-    Card(
-        colors = CardDefaults.cardColors(containerColor = SlateDarkSurface),
-        shape = RoundedCornerShape(12.dp),
-        modifier = Modifier
-            .fillMaxWidth()
-            .border(1.dp, ElectricTeal.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
+            LazyColumn(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable { expanded = !expanded }
+                    .weight(1f),
+                contentPadding = PaddingValues(16.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Icon(
-                        imageVector = Icons.Default.Info,
-                        contentDescription = "Academic Overview",
-                        tint = ElectricTeal
-                    )
-                    Text(
-                        text = if (displayLanguageAr) "الملخص التنفيذي العلمي النهائي (SFI)" else "Final Scientific Executive Summary (SFI)",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White
+                // Input Control and representative selector
+                item {
+                    AnalysisInputCard(
+                        inputValue = inputTemp,
+                        onValueChange = {
+                            inputTemp = it
+                            viewModel.updateInput(it)
+                        },
+                        selectedMode = uiState.selectedMode,
+                        onModeChange = { viewModel.updateMode(it) },
+                        onAnalyzeClick = { viewModel.executeSpectralAnalysis(inputTemp) },
+                        isLoading = uiState.isLoading,
+                        errorMsg = uiState.error
                     )
                 }
-                Text(
-                    text = if (expanded) "▲" else "▼",
-                    color = SoftGrayText,
-                    fontWeight = FontWeight.Bold
-                )
-            }
 
-            AnimatedVisibility(visible = expanded) {
-                Column(modifier = Modifier.padding(top = 12.dp)) {
-                    HorizontalDivider(color = GridLineColor, modifier = Modifier.padding(vertical = 8.dp))
-                    
-                    Text(
-                        text = if (displayLanguageAr) {
-                            "🔬 المشروع: التحليل الأولي عبر الانعكاس الطيفي (SFI)\n" +
-                            "📐 الإطار: مصفوفة تحليل طاقة الأعداد الأولية (MEPA)\n" +
-                            "📊 مصفوفة القيادة: A1 (19x6)"
-                        } else {
-                            "🔬 Project: The Spectral Factorization Inversion (SFI)\n" +
-                            "📐 Framework: Matrix Energetic Prime Analysis (MEPA)\n" +
-                            "📊 Lead Matrix: A1 (19x6)"
-                        },
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = ElectricTeal
-                    )
-                    
-                    Spacer(modifier = Modifier.height(12.dp))
-                    
-                    Text(
-                        text = if (displayLanguageAr) {
-                            "1️⃣ الكيان الرياضي\n" +
-                            "تم إثبات وجود مؤثر هاملتوني نطلق عليه \"مؤثر الإسقاط القاسمي\" (HN)، والذي يقوم بتحويل العدد الصحيح N من قيمته الرقمية المجردة إلى \"حالة طاقوية\" داخل فضاء مصفوفي:\n" +
-                            "H_N = A1ᵀ · diag(gcd(N, a_k)) · A1\n" +
-                            "هذا المؤثر ليس مجرد تمثيل، بل هو \"ترميز مكاني\" (Spatial Encoding) للبنية القاسمية لـ N."
-                        } else {
-                            "1️⃣ The Mathematical Entity\n" +
-                            "An operator Hamiltonian named the \"divisor-projection operator\" (H_N) was proven to exist. It converts the abstract integer N into an \"energetic state\" within a matrix space:\n" +
-                            "H_N = A1ᵀ · diag(gcd(N, a_k)) · A1\n" +
-                            "Rather than a mere representation, this operator acts as a \"spatial encoding\" of N's divisor architecture."
-                        },
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = Color.White,
-                        lineHeight = 20.sp,
-                        modifier = Modifier.padding(bottom = 12.dp)
-                    )
+                // Interactive calculations output cards
+                val activeN = uiState.activeN
+                if (activeN != null) {
+                    item {
+                        PrimeFactorisationCard(
+                            valueN = activeN,
+                            factorsText = uiState.factorsText,
+                            factorsMap = uiState.primeFactors
+                        )
+                    }
 
-                    Text(
-                        text = if (displayLanguageAr) {
-                            "2️⃣ حل معضلة اللاخطية\n" +
-                            "لتجاوز عقبة \"متعددة الحدود المميزة\" والارتباط عالي الدرجة بين الجذور والعوامل الأولية، تم اعتماد \"استراتيجية الثوابت الطيفية\" (Spectral Invariants). بدلاً من البحث عن الجذور الفردية (λ_i)، يتم استغلال:\n\n" +
-                            "• التجانس الهيكلي: الربط الخطي بين أثر مصفوفة المؤشر (Tr(H_N)) ومجموع القواسم.\n" +
-                            "• التحويل اللوغاريتمي: استخدام ln(H_N) لتحويل العلاقات الضربية للعوامل الأولية إلى علاقات جمعية ترددية، مما يكسر حدة اللاخطية الجبرية."
-                        } else {
-                            "2️⃣ Solving Non-linearity\n" +
-                            "To bypass the challenge of characteristic polynomials and high-degree correlation between eigenvalues and prime factors, the \"Spectral Invariants Strategic Approach\" is deployed. Instead of targeting individual eigenvalues (λ_i), we leverage:\n\n" +
-                            "• Structural Homogeneity: Linear coupling between the projection matrix trace (Tr(H_N)) and divisor sum.\n" +
-                            "• Logarithmic Transformation: Operating on ln(H_N) to convert multiplicative prime factor interactions into additive frequency harmonics, cracking algebraic non-linearity."
-                        },
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = Color.White,
-                        lineHeight = 20.sp,
-                        modifier = Modifier.padding(bottom = 12.dp)
-                    )
-
-                    Text(
-                        text = if (displayLanguageAr) {
-                            "3️⃣ مبرهنة الاسترجاع والكفاءة\n" +
-                            "• الوجود: الدالة العكسية F التي تستعيد p من H_N موجودة نظرياً طالما أن N يقع ضمن \"مجال الرؤية\" (V(N) > 0).\n" +
-                            "• الكفاءة: بما أن أبعاد المصفوفة A1 ثابتة (6x6)، فإن تعقيد العملية يؤول إلى O(log N) (وقت لوغاريتمي)، وهو ما يمثل تفوقاً نظرياً على كافة الخوارزميات الحالية التي تتبع التعقيد الأسي."
-                        } else {
-                            "3️⃣ Inversion Theorem & Complexity\n" +
-                            "• Existence: The inverse function F recovering p from H_N is theoretically guaranteed as long as N remains inside the active \"visibility boundary\" (V(N) > 0).\n" +
-                            "• Complexity: Since matrix A1 dimensions are strictly fixed (6x6), the operational cost simplifies to O(log N) (logarithmic time), representing a breakthrough over current exponential complexity models."
-                        },
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = Color.White,
-                        lineHeight = 20.sp,
-                        modifier = Modifier.padding(bottom = 12.dp)
-                    )
-
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(Color(0xFF13202E), RoundedCornerShape(8.dp))
-                            .padding(12.dp)
-                    ) {
-                        Column {
-                            Text(
-                                text = if (displayLanguageAr) "🏆 النتيجة النهائية (Final Verdict)" else "🏆 Final Verdict",
-                                style = MaterialTheme.typography.titleSmall,
-                                fontWeight = FontWeight.Bold,
-                                color = ElectricTeal
-                            )
-                            Spacer(modifier = Modifier.height(6.dp))
-                            Text(
-                                text = if (displayLanguageAr) {
-                                    "المشروع قد صاغ بنجاح \"لغة رنين جديدة\" للأعداد. الأعداد الأولية ليست مجرد قواسم، بل هي \"ترددات أساسية\" داخل النظام الهاملتوني للمصفوفة.\n\n" +
-                                    "الخلاصة الإجرائية للتحليل:\n" +
-                                    "• الإسقاط: تمرير N عبر ملتقطات وفلترة gcd للمصفوفة A1.\n" +
-                                    "• التوليد: بناء مؤثر الطاقة H_N.\n" +
-                                    "• فك الترميز: استخراج عوامل الأعداد عبر الثوابت الطيفية (الأثر والمحدد) في فضاء الإزاحة اللوغاريتمية.\n\n" +
-                                    "وبهذا يتحول تحليل الأعداد من معضلة حسابية شاقة إلى عملية رصد طيفي دقيق، حيث العوامل الأولية هي البصمة الضوئية التي تتركها الأعداد عند مرورها عبر منشور المصفوفة A1."
-                                } else {
-                                    "The project successfully defines a \"resonance language\" for numbers. Primes are no longer treated as raw divisors, but rather as \"fundamental frequencies\" within the Hamiltonian system of the operator matrix.\n\n" +
-                                    "Procedural Analysis Flow:\n" +
-                                    "• Projection: Passing N through the GCD-sensors of A1.\n" +
-                                    "• Generation: Structuring the energetic operator H_N.\n" +
-                                    "• Decoding: Reconstructing prime factors via Spectral Invariants (Trace & Determinant) in logarithmic shift space.\n\n" +
-                                    "Thus, prime factorization transitions from a heavy search to pristine spectral spectroscopy: prime factors are the unique optical signature left by numbers passing through the A1 prism."
-                                },
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = SoftGrayText,
-                                lineHeight = 20.sp
-                            )
+                    val analysis = uiState.semiprimeAnalysis
+                    if (analysis != null) {
+                        item {
+                            SemiprimeSpectralSolverCard(analysis = analysis)
                         }
                     }
+
+                    item {
+                        DiagnosticVisualizationCard(
+                            spectrum = uiState.currentSpectrum,
+                            baseline = uiState.baselineSpectrum,
+                            visibility = uiState.visibilityMetric,
+                            isOpacityTriggered = uiState.isOpacityTriggered
+                        )
+                    }
+
+                    item {
+                        AcademicSpectrumListCard(
+                            spectrum = uiState.currentSpectrum,
+                            baseline = uiState.baselineSpectrum
+                        )
+                    }
+
+                    // Smart AI Explanation Block
+                    item {
+                        AiAcademicInterpretationCard(
+                            valueN = activeN,
+                            isAiLoading = uiState.isAiLoading,
+                            aiExplanation = uiState.aiExplanation,
+                            onRequestInsight = { viewModel.requestAiInsight() }
+                        )
+                    }
+                }
+
+                // Database Historical Records
+                item {
+                    HistoricalRecordsCard(
+                        history = uiState.inspectionHistory,
+                        onRecordClick = { viewModel.loadFromHistory(it) },
+                        onClearClick = { viewModel.clearHistory() }
+                    )
                 }
             }
         }
@@ -358,157 +154,178 @@ fun AcademicBriefingCard(displayLanguageAr: Boolean) {
 }
 
 @Composable
-fun SpectralInputCard(
-    uiState: SpectralUiState,
-    onInputChange: (String) -> Unit,
-    onModeChange: (RowRepresentativeMode) -> Unit,
-    onCalculate: () -> Unit,
-    onLoadPreset: (String) -> Unit,
-    displayLanguageAr: Boolean
-) {
-    var expandedDropdown by remember { mutableStateOf(false) }
-
-    Card(
-        colors = CardDefaults.cardColors(containerColor = SlateDarkSurface),
-        shape = RoundedCornerShape(16.dp),
+fun AcademicHeader() {
+    Box(
         modifier = Modifier
             .fillMaxWidth()
-            .border(1.dp, GridLineColor, RoundedCornerShape(16.dp))
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Text(
-                text = if (displayLanguageAr) "إعدادات مدخلات الرمال الطيفية" else "Resonance Parameters & Settings",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                color = Color.White
+            .background(
+                Brush.verticalGradient(
+                    colors = listOf(SurfaceCardColor, BackgroundColor)
+                )
             )
-            Spacer(modifier = Modifier.height(12.dp))
+            .padding(vertical = 18.dp, horizontal = 24.dp)
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Info,
+                    contentDescription = "Analysis Logo",
+                    tint = PrimaryCyan,
+                    modifier = Modifier.size(28.dp)
+                )
+                Spacer(modifier = Modifier.width(10.dp))
+                Text(
+                    text = "SFI SPECTRAL LAB",
+                    fontSize = 22.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = TextWhite,
+                    letterSpacing = 2.sp,
+                    fontFamily = FontFamily.Monospace
+                )
+            }
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = "مختبر تفكيك القواسم لعدد طبيعي وتحليل الطيف الموصوف",
+                color = TextGrey,
+                fontSize = 11.sp,
+                textAlign = TextAlign.Center
+            )
+        }
+    }
+}
 
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun AnalysisInputCard(
+    inputValue: String,
+    onValueChange: (String) -> Unit,
+    selectedMode: RowRepresentativeMode,
+    onModeChange: (RowRepresentativeMode) -> Unit,
+    onAnalyzeClick: () -> Unit,
+    isLoading: Boolean,
+    errorMsg: String?
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = SurfaceCardColor),
+        shape = RoundedCornerShape(16.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            Text(
+                text = "إعداد عينة التحليل",
+                color = PrimaryCyan,
+                fontWeight = FontWeight.Bold,
+                fontSize = 15.sp
+            )
+
+            // Input number Field supporting huge BigInteger
             OutlinedTextField(
-                value = uiState.inputN,
-                onValueChange = onInputChange,
-                label = { Text(if (displayLanguageAr) "أدخل عدد طبيعي (N)" else "Enter Natural Number (N)") },
-                placeholder = { Text("مثال: 2026") },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                value = inputValue,
+                onValueChange = onValueChange,
+                label = { Text("قيمة الهدف N (يدعم أرقام ضخمة جداً)", color = TextGrey) },
                 singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 modifier = Modifier
                     .fillMaxWidth()
                     .testTag("input_n_field"),
                 colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = ElectricTeal,
-                    unfocusedBorderColor = GridLineColor,
-                    focusedLabelColor = ElectricTeal,
-                    unfocusedLabelColor = SoftGrayText,
-                    focusedTextColor = Color.White,
-                    unfocusedTextColor = Color.White
-                )
-            )
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            Text(
-                text = if (displayLanguageAr) "تحديد ممثل قواسم الصف (D_N)" else "Row Representative Mapping Mode",
-                style = MaterialTheme.typography.labelSmall,
-                color = ElectricTeal,
-                fontWeight = FontWeight.SemiBold
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-            Box(modifier = Modifier.fillMaxWidth()) {
-                Surface(
-                    onClick = { expandedDropdown = true },
-                    color = Color(0xFF1E2833),
-                    shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("mode_dropdown")
-                ) {
-                    Row(
-                        modifier = Modifier.padding(12.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = if (displayLanguageAr) uiState.selectedMode.displayNameAr else uiState.selectedMode.displayNameEn,
-                            color = Color.White,
-                            fontSize = 14.sp
+                    focusedTextColor = TextWhite,
+                    unfocusedTextColor = TextWhite,
+                    focusedBorderColor = PrimaryCyan,
+                    unfocusedBorderColor = DarkGreyLine,
+                    focusedContainerColor = BackgroundColor,
+                    unfocusedContainerColor = BackgroundColor
+                ),
+                trailingIcon = {
+                    if (isLoading) {
+                        CircularProgressIndicator(
+                            color = PrimaryCyan,
+                            modifier = Modifier.size(24.dp),
+                            strokeWidth = 2.dp
                         )
-                        Icon(Icons.Default.ArrowDropDown, contentDescription = "DropdownIcon", tint = ElectricTeal)
+                    } else {
+                        IconButton(onClick = onAnalyzeClick) {
+                            Icon(
+                                imageVector = Icons.Default.Search,
+                                contentDescription = "سحبي",
+                                tint = PrimaryCyan
+                            )
+                        }
                     }
                 }
-                DropdownMenu(
-                    expanded = expandedDropdown,
-                    onDismissRequest = { expandedDropdown = false },
-                    modifier = Modifier.background(SlateDarkSurface)
-                ) {
-                    RowRepresentativeMode.values().forEach { mode ->
-                        DropdownMenuItem(
-                            text = {
-                                Text(
-                                    text = if (displayLanguageAr) mode.displayNameAr else mode.displayNameEn,
-                                    color = Color.White
-                                )
+            )
+
+            if (errorMsg != null) {
+                Text(
+                    text = errorMsg,
+                    color = Color.Red,
+                    fontSize = 12.sp,
+                    modifier = Modifier.padding(horizontal = 4.dp)
+                )
+            }
+
+            Divider(color = DarkGreyLine)
+
+            // Select Row representatives filter mode
+            Text(
+                text = "تحديد خريطة ممثلي الصفوف (Representatives Mapping):",
+                color = TextWhite,
+                fontSize = 12.sp
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                RowRepresentativeMode.values().forEach { mode ->
+                    val isSelected = selectedMode == mode
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(if (isSelected) PrimaryCyan else DarkGreyLine)
+                            .clickable { onModeChange(mode) }
+                            .padding(vertical = 10.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = when (mode) {
+                                RowRepresentativeMode.PRIMES -> "الأعداد الأولية"
+                                RowRepresentativeMode.COMPOSITES -> "المركبة"
+                                RowRepresentativeMode.FIBONACCI -> "فيبوناتشي"
                             },
-                            onClick = {
-                                onModeChange(mode)
-                                expandedDropdown = false
-                            }
+                            color = if (isSelected) BackgroundColor else TextWhite,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp
                         )
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
-
             Button(
-                onClick = onCalculate,
-                colors = ButtonDefaults.buttonColors(containerColor = ElectricTeal),
+                onClick = onAnalyzeClick,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(48.dp)
-                    .testTag("calculate_button"),
-                shape = RoundedCornerShape(8.dp)
+                    .testTag("analyze_button"),
+                colors = ButtonDefaults.buttonColors(containerColor = PrimaryCyan),
+                shape = RoundedCornerShape(10.dp)
             ) {
-                if (uiState.isCalculating) {
-                    CircularProgressIndicator(modifier = Modifier.size(24.dp), color = SlateDarkBackground)
-                } else {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Icon(Icons.Default.PlayArrow, contentDescription = null, tint = SlateDarkBackground)
-                        Text(
-                            text = if (displayLanguageAr) "تحليل الرنين والتحليل الأولي" else "Factorise & Calculate Spectrum",
-                            color = SlateDarkBackground,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(14.dp))
-
-            Text(
-                text = if (displayLanguageAr) "عينات سريعة للاختبار العلمي:" else "Quick Spectral Presets:",
-                style = MaterialTheme.typography.labelSmall,
-                color = SoftGrayText
-            )
-            Spacer(modifier = Modifier.height(6.dp))
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                listOf("30", "101", "2026", "1000003").forEach { preset ->
-                    val isBlindspot = preset == "1000003"
-                    val label = if (isBlindspot) {
-                        if (displayLanguageAr) "عتيم 1M" else "Opacity 1M"
-                    } else preset
-
-                    SuggestionChip(
-                        onClick = { onLoadPreset(preset) },
-                        label = { Text(label) },
-                        colors = SuggestionChipDefaults.suggestionChipColors(
-                            containerColor = if (isBlindspot) Color(0xFF332015) else Color(0xFF1B252E),
-                            labelColor = if (isBlindspot) AtomicOrange else ElectricTeal
-                        )
-                    )
-                }
+                Text(
+                    text = "ابدأ التحليل",
+                    color = BackgroundColor,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 14.sp
+                )
             }
         }
     }
@@ -516,526 +333,707 @@ fun SpectralInputCard(
 
 @Composable
 fun PrimeFactorisationCard(
-    valueN: java.math.BigInteger,
+    valueN: BigInteger,
     factorsText: String,
-    factorsMap: Map<java.math.BigInteger, Int>,
-    displayLanguageAr: Boolean
+    factorsMap: Map<BigInteger, Int>
 ) {
-    Card(
-        colors = CardDefaults.cardColors(containerColor = SlateDarkSurface),
-        shape = RoundedCornerShape(16.dp),
-        modifier = Modifier
-            .fillMaxWidth()
-            .border(1.dp, GridLineColor, RoundedCornerShape(16.dp))
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Text(
-                text = if (displayLanguageAr) "التحليل لعاملي الفريد الرياضي لـ N" else "Unique Base-Exponent Factorisation for N",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                color = Color.White
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(Color(0xFF0C1014), RoundedCornerShape(8.dp))
-                    .padding(14.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(
-                        text = "N = $valueN",
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White,
-                        fontFamily = FontFamily.Monospace
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        text = "F(σ(H_N)) = $factorsText",
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.Black,
-                        color = CyberGreen,
-                        fontFamily = FontFamily.Monospace,
-                        textAlign = TextAlign.Center
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            if (factorsMap.isEmpty()) {
-                Text(
-                    text = if (displayLanguageAr) "الرقم 1 ليس له عوامل أولية." else "Number 1 has no prime factors.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = SoftGrayText
-                )
-            } else {
-                Text(
-                    text = if (displayLanguageAr) "عناصر التفكيك الأولية:" else "Decomposed Prime Constituents:",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = SoftGrayText
-                )
-                Spacer(modifier = Modifier.height(6.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    factorsMap.forEach { (prime, exponent) ->
-                        Box(
-                            modifier = Modifier
-                                .background(Color(0xFF132A1C), RoundedCornerShape(8.dp))
-                                .border(1.dp, CyberGreen.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
-                                .padding(horizontal = 10.dp, vertical = 6.dp)
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Text(text = "$prime", color = CyberGreen, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                                Text(
-                                    text = if (exponent > 1) "²" else "¹", // Keep dynamic exponent formatting simple and robust
-                                    color = Color.White,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Black
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun SpectralCouplingStatusCard(
-    isOpacityTriggered: Boolean,
-    visibilityDistance: Double,
-    displayLanguageAr: Boolean
-) {
-    val bg = if (isOpacityTriggered) Color(0xFF2C1C13) else Color(0xFF10282A)
-    val borderCol = if (isOpacityTriggered) AtomicOrange else ElectricTeal
-    val accentCol = if (isOpacityTriggered) AtomicOrange else ElectricTeal
+    val isPrime = factorsMap.size == 1 && factorsMap.values.firstOrNull() == 1
 
     Card(
-        colors = CardDefaults.cardColors(containerColor = bg),
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = SurfaceCardColor),
         shape = RoundedCornerShape(16.dp),
-        modifier = Modifier
-            .fillMaxWidth()
-            .border(1.dp, borderCol, RoundedCornerShape(16.dp))
+        border = BorderStroke(1.dp, if (isPrime) AccentGold.copy(0.4f) else Color.Transparent)
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Warning,
-                    contentDescription = null,
-                    tint = accentCol
-                )
-                Text(
-                    text = if (isOpacityTriggered) {
-                        if (displayLanguageAr) "رصد: عتمة القواسم الطيفية" else "Alert: Total Spectral Opacity"
-                    } else {
-                        if (displayLanguageAr) "رصد: رنين طيفي مزدوج مرتفع" else "Resonant Spectral Visibility High"
-                    },
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White
-                )
-            }
-            Spacer(modifier = Modifier.height(10.dp))
-
-            Text(
-                text = if (isOpacityTriggered) {
-                    if (displayLanguageAr) {
-                        "الرقم المدخل أولي تماماً (Coprime) مع جميع عناصر مصفوفة قياس المختبر A1. هذا يحقق 'العتمة الطيفية' حيث d_ii = 1 مما يرجع المؤثر إلى هيكل الأساس H = A1ᵀA1 وبالتالي تشابه البصمة بالكامل مع 0.0 تباين."
-                    } else {
-                        "The input is completely coprime to the reference parameters in matrix A1. This triggers complete spectral opacity where D_N = Identity and thus H_N = A1ᵀA1. Visibility is 0.0."
-                    }
-                } else {
-                    if (displayLanguageAr) {
-                        "تفاعل رنيني ممتاز! يشترك العدد N في قواسم مشتركة ثنائية مع مركبات المصفوفة المرجعية A1. بعد الطيف الحالي عن خط أساس العتمة يعطي مؤشر رؤية عالي الدقة."
-                    } else {
-                        "Excellent resonant interaction! The number N shares prime divisors with the reference components of matrix A1, inducing visible spectral divergence from baseline opacity."
-                    }
-                },
-                style = MaterialTheme.typography.bodyMedium,
-                color = SoftGrayText,
-                lineHeight = 20.sp
-            )
-
-            Spacer(modifier = Modifier.height(12.dp))
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                Text(
-                    text = if (displayLanguageAr) "مسافة الرؤية (Visibility Distance):" else "Visibility Distance:",
-                    style = MaterialTheme.typography.titleSmall,
-                    color = Color.White,
-                    fontWeight = FontWeight.Bold
-                )
-                Text(
-                    text = String.format(Locale.US, "%.4f", visibilityDistance),
-                    style = MaterialTheme.typography.titleMedium,
-                    color = accentCol,
-                    fontWeight = FontWeight.Black,
-                    fontFamily = FontFamily.Monospace
-                )
-            }
-        }
-    }
-}
-
-@Composable
-fun SpectralChartCard(
-    currentSpectrum: DoubleArray,
-    baselineSpectrum: DoubleArray,
-    displayLanguageAr: Boolean
-) {
-    Card(
-        colors = CardDefaults.cardColors(containerColor = SlateDarkSurface),
-        shape = RoundedCornerShape(16.dp),
-        modifier = Modifier
-            .fillMaxWidth()
-            .border(1.dp, GridLineColor, RoundedCornerShape(16.dp))
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Text(
-                text = if (displayLanguageAr) "تحليل البصمة الطيفية للمؤثر σ(H_N)" else "Operator Spectral Spectrum σ(H_N)",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                color = Color.White
-            )
-            Text(
-                text = if (displayLanguageAr) "القيم الذاتية للرنين الطيفي (Teal) مقابل المقاربة الأساسية (Orange)" else "Eigenvalues (Teal) vs. Coprime Opacity baseline (Orange)",
-                style = MaterialTheme.typography.bodySmall,
-                color = SoftGrayText
-            )
-            Spacer(modifier = Modifier.height(16.dp))
-
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(200.dp)
-                    .background(Color(0xFF080C0F), RoundedCornerShape(8.dp))
-                    .padding(8.dp)
-            ) {
-                Canvas(modifier = Modifier.fillMaxSize()) {
-                    val w = size.width
-                    val h = size.height
-
-                    val numHorizontalLines = 4
-                    for (i in 0..numHorizontalLines) {
-                        val y = h * i / numHorizontalLines
-                        drawLine(
-                            color = GridLineColor.copy(alpha = 0.5f),
-                            start = Offset(0f, y),
-                            end = Offset(w, y),
-                            strokeWidth = 1f,
-                            pathEffect = PathEffect.dashPathEffect(floatArrayOf(10f, 10f))
-                        )
-                    }
-
-                    val maxVal = max(
-                        currentSpectrum.maxOrNull() ?: 1.0,
-                        baselineSpectrum.maxOrNull() ?: 1.0
-                    ) * 1.1
-
-                    val numPoints = 6
-                    val stepX = w / (numPoints + 1)
-
-                    // Baseline peaks
-                    for (i in 0 until numPoints) {
-                        val x = stepX * (i + 1)
-                        val baselineVal = baselineSpectrum[i]
-                        val baselineY = h - (h * (baselineVal / maxVal)).toFloat()
-
-                        drawLine(
-                            color = AtomicOrange.copy(alpha = 0.4f),
-                            start = Offset(x, h),
-                            end = Offset(x, baselineY),
-                            strokeWidth = 4f
-                        )
-                        drawCircle(
-                            color = AtomicOrange,
-                            radius = 6f,
-                            center = Offset(x, baselineY)
-                        )
-                    }
-
-                    // Active peaks
-                    for (i in 0 until numPoints) {
-                        val x = stepX * (i + 1)
-                        val currentVal = currentSpectrum[i]
-                        val currentY = h - (h * (currentVal / maxVal)).toFloat()
-
-                        drawLine(
-                            color = ElectricTeal.copy(alpha = 0.8f),
-                            start = Offset(x - 8f, h),
-                            end = Offset(x - 8f, currentY),
-                            strokeWidth = 10f
-                        )
-                        drawCircle(
-                            color = ElectricTeal,
-                            radius = 8f,
-                            center = Offset(x - 8f, currentY)
-                        )
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(14.dp))
-
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                for (i in 0 until 6) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(Color(0xFF10161C), RoundedCornerShape(4.dp))
-                            .padding(horizontal = 8.dp, vertical = 6.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text(
-                            text = if (displayLanguageAr) "القيمة الذاتية الأولى λ_${i+1}" else "Eigenvalue λ_${i+1}",
-                            color = Color.White,
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Box(modifier = Modifier.size(8.dp).background(ElectricTeal, RoundedCornerShape(2.dp)))
-                                Text(
-                                    text = String.format(Locale.US, "%.1f", currentSpectrum[i]),
-                                    color = ElectricTeal,
-                                    fontWeight = FontWeight.Bold,
-                                    fontFamily = FontFamily.Monospace
-                                )
-                            }
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Box(modifier = Modifier.size(8.dp).background(AtomicOrange, RoundedCornerShape(2.dp)))
-                                Text(
-                                    text = String.format(Locale.US, "%.1f", baselineSpectrum[i]),
-                                    color = AtomicOrange.copy(alpha = 0.7f),
-                                    fontSize = 11.sp,
-                                    fontFamily = FontFamily.Monospace
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun OperatorSpectroscopyMatrixCard(
-    valueN: java.math.BigInteger,
-    selectedMode: RowRepresentativeMode,
-    displayLanguageAr: Boolean
-) {
-    var showExplanation by remember { mutableStateOf(false) }
-
-    Card(
-        colors = CardDefaults.cardColors(containerColor = SlateDarkSurface),
-        shape = RoundedCornerShape(16.dp),
-        modifier = Modifier
-            .fillMaxWidth()
-            .border(1.dp, GridLineColor, RoundedCornerShape(16.dp))
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = if (displayLanguageAr) "تمثيل مصفوفة مؤثر القواسم H_N" else "H_N Operator Spectroscopy Grid",
-                    style = MaterialTheme.typography.titleMedium,
+                    text = "التفكيك الأولي للعدد (الضرب القاسمي الفريد)",
+                    color = PrimaryCyan,
                     fontWeight = FontWeight.Bold,
-                    color = Color.White
+                    fontSize = 14.sp
                 )
-                IconButton(onClick = { showExplanation = !showExplanation }) {
-                    Icon(
-                        imageVector = Icons.Default.Info,
-                        contentDescription = "Show Operator Info",
-                        tint = ElectricTeal
-                    )
-                }
-            }
 
-            AnimatedVisibility(visible = showExplanation) {
+                // High-fidelity type badge
                 Box(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 8.dp)
-                        .background(Color(0xFF10161C), RoundedCornerShape(8.dp))
-                        .padding(10.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(if (isPrime) AccentGold.copy(0.2f) else DarkGreyLine)
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
                 ) {
                     Text(
-                        text = if (displayLanguageAr) {
-                            "المصفوفة H_N هي مصفوفة متماثلة أبعادها 6x6 تُحسب عبر ضرب الأوزان:\n" +
-                                    "H_N[j][k] = ∑_{i=0..18} A1[i][j] · d_ii · A1[i][k]\n" +
-                                    "حيث d_ii = gcd(N, representative_i). تمثل كل خلية طاقة الربط والترابط الطيفي لقواسم صفوف A1 المرجعية."
-                        } else {
-                            "The symmetric matrix H_N (6x6) is computed as follows:\n" +
-                                    "H_N[j][k] = ∑_{i=0..18} A1[i][j] · d_ii · A1[i][k]\n" +
-                                    "Where d_ii = gcd(N, representative_i). Heat intensities map the coupled divisors energy dynamically."
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = SoftGrayText,
-                        lineHeight = 16.sp
+                        text = if (isPrime) "عدد أولي (Prime)" else "عدد مركب (Composite)",
+                        color = if (isPrime) AccentGold else TextWhite,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
                     )
                 }
             }
 
-            val dn = SDIMath.computeDN(valueN, selectedMode)
-            val hn = SDIMath.computeHN(dn)
+            Divider(color = DarkGreyLine)
 
-            // Avoid local variable shadowing compiler issue
-            var maxHNVal = 1.0
-            for (i in 0 until 6) {
-                for (j in 0 until 6) {
-                    val valueInCell = hn[i][j]
-                    if (valueInCell > maxHNVal) {
-                        maxHNVal = valueInCell
-                    }
-                }
-            }
+            Text(
+                text = "N = $valueN",
+                color = TextWhite,
+                fontSize = 13.sp,
+                fontFamily = FontFamily.Monospace,
+                lineHeight = 18.sp
+            )
 
-            // Grid of 36 elements
-            Column(
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(vertical = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
+                    .background(BackgroundColor, RoundedCornerShape(10.dp))
+                    .padding(14.dp)
+                    .border(1.dp, DarkGreyLine, RoundedCornerShape(10.dp))
             ) {
-                for (rowIdx in 0 until 6) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        for (colIdx in 0 until 6) {
-                            val matrixVal = hn[rowIdx][colIdx]
-                            val relativeMagnitude = matrixVal / maxHNVal
-                            val baseShadeColor = ElectricTeal.copy(
-                                alpha = (relativeMagnitude * 0.85f + 0.15f).toFloat()
-                            )
-
-                            fun formatCellValue(cellVal: Double): String {
-                                return when {
-                                    cellVal >= 1e6 -> String.format(Locale.US, "%.1fM", cellVal / 1e6)
-                                    cellVal >= 1e3 -> String.format(Locale.US, "%.1fk", cellVal / 1e3)
-                                    else -> String.format(Locale.US, "%.0f", cellVal)
-                                }
-                            }
-
-                            Box(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .aspectRatio(1f)
-                                    .background(baseShadeColor, RoundedCornerShape(4.dp))
-                                    .border(0.5.dp, GridLineColor, RoundedCornerShape(4.dp)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = formatCellValue(matrixVal),
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = if (relativeMagnitude > 0.5) SlateDarkBackground else Color.White,
-                                    textAlign = TextAlign.Center
-                                )
-                            }
-                        }
-                    }
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        text = factorsText,
+                        color = PrimaryCyan,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center,
+                        fontFamily = FontFamily.Monospace,
+                        modifier = Modifier.fillMaxWidth()
+                    )
                 }
-            }
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(
-                    text = if (displayLanguageAr) "مؤثر رنين تماثلي [Symmetric Matrix 6x6]" else "[Symmetric Operator 6x6]",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = SoftGrayText
-                )
-                Text(
-                    text = if (displayLanguageAr) "شدة اللون تتناسب مع قيم خلايا المؤشر" else "Spectrum heats mapped to cells",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = ElectricTeal
-                )
             }
         }
     }
 }
 
 @Composable
-fun GeminiAcademicAnalysisCard(
-    uiState: SpectralUiState,
-    onRequestAiAnalysis: () -> Unit,
-    displayLanguageAr: Boolean
+fun DiagnosticVisualizationCard(
+    spectrum: DoubleArray,
+    baseline: DoubleArray,
+    visibility: Double,
+    isOpacityTriggered: Boolean
 ) {
     Card(
-        colors = CardDefaults.cardColors(containerColor = SlateDarkSurface),
-        shape = RoundedCornerShape(16.dp),
-        modifier = Modifier
-            .fillMaxWidth()
-            .border(1.dp, ElectricTeal.copy(alpha = 0.4f), RoundedCornerShape(16.dp))
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = SurfaceCardColor),
+        shape = RoundedCornerShape(16.dp)
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                Icon(Icons.Default.Star, contentDescription = "AI Report", tint = ElectricTeal)
-                Text(
-                    text = if (displayLanguageAr) "تفسير الذكاء الاصطناعي الأكاديمي" else "Academic AI Spectral Analysis Report",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White
-                )
-            }
-            Spacer(modifier = Modifier.height(10.dp))
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
             Text(
-                text = if (displayLanguageAr) {
-                    "أرسل طيف ومعلومات الرقم المدروس الحالي إلى خدمة Gemini 3.5 Flash لاستخلاص مراجعة طوبولوجية جبرية رصينة ومتقنة."
-                } else {
-                    "Submit the spectrum data and components to Gemini 3.5 Flash for complete algebraic topology synthesis."
-                },
-                style = MaterialTheme.typography.bodySmall,
-                color = SoftGrayText,
-                lineHeight = 16.sp
+                text = "رنين التداخل الطيفي الموصوف (Resonance Canvas)",
+                color = PrimaryCyan,
+                fontWeight = FontWeight.Bold,
+                fontSize = 14.sp
             )
 
-            Spacer(modifier = Modifier.height(14.dp))
+            Divider(color = DarkGreyLine)
 
-            if (uiState.aiAnalysisText.isEmpty()) {
-                Button(
-                    onClick = onRequestAiAnalysis,
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1B303A)),
-                    shape = RoundedCornerShape(8.dp),
+            // Dynamic Spectral Drawing
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(180.dp)
+                    .background(BackgroundColor, RoundedCornerShape(12.dp))
+                    .padding(8.dp)
+            ) {
+                ResonanceCanvas(
+                    spectrum = spectrum,
+                    baseline = baseline,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+
+            // Legend labels
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceAround
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(modifier = Modifier.size(10.dp).background(PrimaryCyan, RoundedCornerShape(2.dp)))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("طيف الرنين الحالي σ(H_N)", color = TextWhite, fontSize = 11.sp)
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(modifier = Modifier.size(10.dp).background(Color.Gray.copy(0.6f), RoundedCornerShape(2.dp)))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("طيف الأساس العاتم (Baseline)", color = TextWhite, fontSize = 11.sp)
+                }
+            }
+
+            Divider(color = DarkGreyLine)
+
+            // Visibility Metric indicator
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "مسافة الرؤية الطيفية (Spectral Visibility):",
+                    color = TextGrey,
+                    fontSize = 12.sp
+                )
+                Text(
+                    text = String.format("%.6f", visibility),
+                    color = PrimaryCyan,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 15.sp,
+                    fontFamily = FontFamily.Monospace
+                )
+            }
+
+            // Linear Progress mapping visibility
+            val maxVisibilityRef = 100.0
+            val progressVal = (visibility / maxVisibilityRef).coerceIn(0.0, 1.0).toFloat()
+            LinearProgressIndicator(
+                progress = progressVal,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(6.dp)
+                    .clip(RoundedCornerShape(3.dp)),
+                color = PrimaryCyan,
+                trackColor = DarkGreyLine
+            )
+
+            // Opacity Trigger alarm
+            if (isOpacityTriggered) {
+                Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .border(1.dp, ElectricTeal, RoundedCornerShape(8.dp))
-                        .testTag("ai_rapport_button"),
-                    enabled = !uiState.isAiLoading
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(AccentGold.copy(0.15f))
+                        .border(1.dp, AccentGold, RoundedCornerShape(10.dp))
+                        .padding(12.dp)
                 ) {
-                    if (uiState.isAiLoading) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            CircularProgressIndicator(modifier = Modifier.size(20.dp), color = ElectricTeal)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.Warning,
+                            contentDescription = "Opacity Alert",
+                            tint = AccentGold,
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column {
                             Text(
-                                text = if (displayLanguageAr) "جاري صياغة التقرير المعملي..." else "Analyzing spectrum...",
-                                color = ElectricTeal
+                                text = "حالة العتمة الطيفية بالكامل (Full Opacity Zone)",
+                                color = AccentGold,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp
+                            )
+                            Text(
+                                text = "مفعل نتيجة كون العينة قواسم أولية غير مترابطة لأي من خطوط الإسقاط لـ A1.",
+                                color = TextWhite,
+                                fontSize = 10.sp
                             )
                         }
-                    } else {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Icon(Icons.Default.Star, contentDescription = null, tint = ElectricTeal)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ResonanceCanvas(
+    spectrum: DoubleArray,
+    baseline: DoubleArray,
+    modifier: Modifier = Modifier
+) {
+    Canvas(modifier = modifier) {
+        val width = size.width
+        val height = size.height
+        val padding = 32f
+
+        val fullSpectrum = spectrum + baseline
+        val maxVal = (fullSpectrum.maxOrNull() ?: 1.0).toFloat().coerceAtLeast(1f)
+
+        // Draw background horizontal grid
+        val gridLines = 4
+        for (i in 0..gridLines) {
+            val y = padding + (height - 2 * padding) * i / gridLines
+            drawLine(
+                color = DarkGreyLine.copy(0.4f),
+                start = androidx.compose.ui.geometry.Offset(padding, y),
+                end = androidx.compose.ui.geometry.Offset(width - padding, y),
+                strokeWidth = 1f
+            )
+        }
+
+        // Helper calculation
+        fun getPoint(index: Int, rawValue: Double): androidx.compose.ui.geometry.Offset {
+            val x = padding + (width - 2 * padding) * index / 5
+            val y = height - padding - (rawValue.toFloat() / maxVal) * (height - 2 * padding)
+            return androidx.compose.ui.geometry.Offset(x, y)
+        }
+
+        // Draw Baseline Spectrum
+        val baselinePoints = baseline.mapIndexed { i, value -> getPoint(i, value) }
+        for (i in 0 until baselinePoints.size - 1) {
+            drawLine(
+                color = Color.Gray.copy(alpha = 0.5f),
+                start = baselinePoints[i],
+                end = baselinePoints[i + 1],
+                strokeWidth = 4f
+            )
+        }
+        baselinePoints.forEach { pt ->
+            drawCircle(
+                color = Color.Gray.copy(alpha = 0.8f),
+                radius = 8f,
+                center = pt
+            )
+        }
+
+        // Draw Active Spectrum
+        val activePoints = spectrum.mapIndexed { i, value -> getPoint(i, value) }
+        for (i in 0 until activePoints.size - 1) {
+            drawLine(
+                color = PrimaryCyan,
+                start = activePoints[i],
+                end = activePoints[i + 1],
+                strokeWidth = 6f
+            )
+        }
+        activePoints.forEach { pt ->
+            drawCircle(
+                color = PrimaryCyan,
+                radius = 12f,
+                center = pt
+            )
+            drawCircle(
+                color = Color.White,
+                radius = 5f,
+                center = pt
+            )
+        }
+    }
+}
+
+@Composable
+fun AcademicSpectrumListCard(
+    spectrum: DoubleArray,
+    baseline: DoubleArray
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = SurfaceCardColor),
+        shape = RoundedCornerShape(16.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Text(
+                text = "مصفوفة المؤشرات الطيفية الذاتية σ(H_N) والأساس",
+                color = PrimaryCyan,
+                fontWeight = FontWeight.Bold,
+                fontSize = 14.sp
+            )
+
+            Divider(color = DarkGreyLine)
+
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("مؤشر الرتبة", modifier = Modifier.weight(1f), color = TextGrey, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Text("القيمة الحالية", modifier = Modifier.weight(1.5f), color = TextGrey, fontSize = 11.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.End)
+                Text("قيمة الأساس", modifier = Modifier.weight(1.5f), color = TextGrey, fontSize = 11.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.End)
+            }
+
+            Divider(color = DarkGreyLine.copy(0.5f))
+
+            for (i in 0 until Math.min(spectrum.size, baseline.size)) {
+                Row(
+                    modifier = Modifier.padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "القيمة الذاتية λ_${i + 1}",
+                        modifier = Modifier.weight(1f),
+                        color = TextWhite,
+                        fontSize = 12.sp,
+                        fontFamily = FontFamily.Monospace
+                    )
+                    Text(
+                        text = String.format("%.4f", spectrum[i]),
+                        modifier = Modifier.weight(1.5f),
+                        color = PrimaryCyan,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        textAlign = TextAlign.End
+                    )
+                    Text(
+                        text = String.format("%.4f", baseline[i]),
+                        modifier = Modifier.weight(1.5f),
+                        color = Color.Gray,
+                        fontSize = 12.sp,
+                        fontFamily = FontFamily.Monospace,
+                        textAlign = TextAlign.End
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun AiAcademicInterpretationCard(
+    valueN: BigInteger,
+    isAiLoading: Boolean,
+    aiExplanation: String,
+    onRequestInsight: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = SurfaceCardColor),
+        shape = RoundedCornerShape(16.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.Info,
+                        contentDescription = "AI Symbol",
+                        tint = PrimaryCyan,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "التحليل الطوبولوجي الذكي (AI)",
+                        color = PrimaryCyan,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp
+                    )
+                }
+
+                if (aiExplanation.isNotEmpty() && !isAiLoading) {
+                    Button(
+                        onClick = onRequestInsight,
+                        colors = ButtonDefaults.buttonColors(containerColor = DarkGreyLine),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                        modifier = Modifier.height(30.dp)
+                    ) {
+                        Text("تحديث التقرير", color = TextWhite, fontSize = 11.sp)
+                    }
+                }
+            }
+
+            Divider(color = DarkGreyLine)
+
+            if (isAiLoading) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 32.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    CircularProgressIndicator(color = PrimaryCyan)
+                    Text(
+                        text = "جاري تجميع الانحناءات الطوبولوجية وصياغة التفسير العلمي...",
+                        color = TextGrey,
+                        fontSize = 12.sp,
+                        textAlign = TextAlign.Center
+                    )
+                }
+            } else if (aiExplanation.isNotEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(BackgroundColor, RoundedCornerShape(10.dp))
+                        .padding(14.dp)
+                        .border(1.dp, DarkGreyLine, RoundedCornerShape(10.dp))
+                ) {
+                    Text(
+                        text = aiExplanation,
+                        color = TextWhite,
+                        fontSize = 13.sp,
+                        lineHeight = 22.sp,
+                        textAlign = TextAlign.Justify
+                    )
+                }
+            } else {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text(
+                        text = "هل ترغب في صياغة تقرير أكاديمي ونمذجة طوبولوجية دلالية للعدد $valueN؟",
+                        color = TextGrey,
+                        fontSize = 12.sp,
+                        textAlign = TextAlign.Center
+                    )
+                    Button(
+                        onClick = onRequestInsight,
+                        modifier = Modifier.testTag("request_ai_button"),
+                        colors = ButtonDefaults.buttonColors(containerColor = PrimaryCyan),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text("صياغة التحليل الأكاديمي الشامل", color = BackgroundColor, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun HistoricalRecordsCard(
+    history: List<SpectralRecord>,
+    onRecordClick: (SpectralRecord) -> Unit,
+    onClearClick: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = SurfaceCardColor),
+        shape = RoundedCornerShape(16.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.List,
+                        contentDescription = "History Icon",
+                        tint = PrimaryCyan,
+                        modifier = Modifier.size(22.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "سجل التحليلات الموثقة للباحثين",
+                        color = PrimaryCyan,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp
+                    )
+                }
+
+                if (history.isNotEmpty()) {
+                    IconButton(onClick = onClearClick) {
+                        Icon(
+                            imageVector = Icons.Default.Delete,
+                            contentDescription = "مسح الكلية",
+                            tint = Color.Red.copy(0.7f)
+                        )
+                    }
+                }
+            }
+
+            Divider(color = DarkGreyLine)
+
+            if (history.isEmpty()) {
+                Text(
+                    text = "السجل البحثي فارغ حالياً، قم بدراسة الأعداد لتسجيل البصمات المقاسة.",
+                    color = TextGrey,
+                    fontSize = 12.sp,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 16.dp)
+                )
+            } else {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    history.take(15).forEach { record ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(BackgroundColor)
+                                .clickable { onRecordClick(record) }
+                                .padding(12.dp)
+                                .border(1.dp, DarkGreyLine.copy(0.5f), RoundedCornerShape(8.dp)),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "N = ${record.valueN}",
+                                    color = TextWhite,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = "التفكيك: ${record.factorsText}",
+                                    color = TextGrey,
+                                    fontSize = 11.sp
+                                )
+                            }
+                            Column(horizontalAlignment = Alignment.End) {
+                                Text(
+                                    text = "الرؤية: ${String.format("%.4f", record.visibilityMetric)}",
+                                    color = PrimaryCyan,
+                                    fontSize = 11.sp,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                                if (record.isOpacityTriggered) {
+                                    Text(
+                                        text = "عتمة كاملة",
+                                        color = AccentGold,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun SemiprimeSpectralSolverCard(
+    analysis: SDIMath.SemiprimeAnalysis
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth().testTag("semiprime_solver_card"),
+        colors = CardDefaults.cardColors(containerColor = SurfaceCardColor),
+        shape = RoundedCornerShape(16.dp),
+        border = BorderStroke(1.dp, PrimaryCyan.copy(0.3f))
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Star,
+                    contentDescription = "Spectral Math",
+                    tint = AccentGold,
+                    modifier = Modifier.size(24.dp)
+                )
+                Text(
+                    text = "مفكك الأعداد شبه الأولية بالتأويل الطيفي والانهيار القاسمي",
+                    color = AccentGold,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 14.sp
+                )
+            }
+
+            Divider(color = DarkGreyLine)
+
+            Text(
+                text = "يُمثل هذا اللوح النمذجة الرياضية لثنائية الفلق واستخراج العوامل طيفياً بناءً على إرشاد الباحث واستراتيجية التصفية عبر الأثر الطيفي (Spectral Trace Filtering).",
+                color = TextGrey,
+                fontSize = 11.sp,
+                lineHeight = 18.sp
+            )
+
+            // Section 1: Dual Space Logarithmic Shift
+            if (!analysis.isPrime) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(BackgroundColor, RoundedCornerShape(10.dp))
+                        .padding(12.dp)
+                        .border(1.dp, DarkGreyLine, RoundedCornerShape(10.dp))
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(
+                            text = "1. صيغة فيت في الفضاء الطوبولوجي المزدوج (Dual-Space Shift)",
+                            color = PrimaryCyan,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp
+                        )
+                        Text(
+                            text = "• لوغاريتم الطول الرنيني ln(N): ${String.format("%.6f", analysis.lnN)}",
+                            color = TextWhite,
+                            fontSize = 11.sp,
+                            fontFamily = FontFamily.Monospace
+                        )
+                        Text(
+                            text = "• فجوة المؤشرات الطيفية Δ_σ: ${String.format("%.6f", analysis.spectralGap)}",
+                            color = TextWhite,
+                            fontSize = 11.sp,
+                            fontFamily = FontFamily.Monospace
+                        )
+                        Text(
+                            text = "• حل ثنائية الفلق اللوغاريتمي المتوازن:",
+                            color = TextGrey,
+                            fontSize = 10.sp
+                        )
+                        
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(SurfaceCardColor, RoundedCornerShape(6.dp))
+                                .padding(8.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
                             Text(
-                                text = if (displayLanguageAr) "توليد التقرير الأكاديمي (Gemini)" else "Generate Academic Report Formulation",
-                                color = Color.White,
-                                fontWeight = FontWeight.Bold
+                                    text = "P₁ = exp((ln(N) - √Δ_σ) / 2) && P₂ = exp((ln(N) + √Δ_σ) / 2)",
+                                color = PrimaryCyan,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = "العامل المسترجع الأول P₁:",
+                                color = TextGrey,
+                                fontSize = 11.sp
+                            )
+                            Text(
+                                text = analysis.p1.toString(),
+                                color = AccentGold,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp,
+                                fontFamily = FontFamily.Monospace,
+                                textAlign = TextAlign.End,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = "العامل المسترجع الثاني P₂:",
+                                color = TextGrey,
+                                fontSize = 11.sp
+                            )
+                            Text(
+                                text = analysis.p2.toString(),
+                                color = PrimaryCyan,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp,
+                                fontFamily = FontFamily.Monospace,
+                                textAlign = TextAlign.End,
+                                modifier = Modifier.weight(1f)
                             )
                         }
                     }
@@ -1044,146 +1042,144 @@ fun GeminiAcademicAnalysisCard(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(Color(0xFF0C1014), RoundedCornerShape(10.dp))
-                        .border(1.dp, GridLineColor, RoundedCornerShape(10.dp))
-                        .padding(14.dp)
+                        .background(BackgroundColor, RoundedCornerShape(10.dp))
+                        .padding(12.dp)
+                        .border(1.dp, DarkGreyLine, RoundedCornerShape(10.dp))
                 ) {
-                    Column {
+                    Text(
+                        text = "العدد الحالي أولي؛ النمذجة الفريدة لا تتطلب ثنائية فلق دلالية.",
+                        color = TextGrey,
+                        fontSize = 11.sp
+                    )
+                }
+            }
+
+            // Section 2: Trace Constant & Hamiltonian Coupling
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(BackgroundColor, RoundedCornerShape(10.dp))
+                    .padding(12.dp)
+                    .border(1.dp, DarkGreyLine, RoundedCornerShape(10.dp))
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        text = "2. ثابت رنين الهاميلتونيان وأثر المنظومة المتصلة",
+                        color = PrimaryCyan,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 12.sp
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("• أثر الهاميلتونيان Tr(H_N):", color = TextGrey, fontSize = 11.sp)
+                        Text(String.format("%.4f", analysis.trHN), color = TextWhite, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("• أثر الإسقاط الموجي Tr(A1ᵀ * A1):", color = TextGrey, fontSize = 11.sp)
+                        Text(String.format("%.4f", analysis.trA1A1), color = TextWhite, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("• ثابت الاقتران الطيفي κ = ΔTr / (P₁+P₂):", color = TextGrey, fontSize = 11.sp)
+                        Text(
+                            text = if (analysis.kappa > 1e-18) String.format("%.4e", analysis.kappa) else "0.00 (المنطقة العاتمة)",
+                            color = AccentGold,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 11.sp,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+                }
+            }
+
+            // Section 3: Spectral Trace Filtering and Divisorial Collapse
+            if (!analysis.isPrime) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(BackgroundColor, RoundedCornerShape(10.dp))
+                        .padding(12.dp)
+                        .border(1.dp, DarkGreyLine, RoundedCornerShape(10.dp))
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(
+                            text = "3. تصفية الأثر الطيفي والانهيار القاسمي لـ P1",
+                            color = PrimaryCyan,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp
+                        )
+                        Text(
+                            text = "• دالة الانهيار المحددة بالربط الترددي الموزون:",
+                            color = TextGrey,
+                            fontSize = 11.sp
+                        )
+                        
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(SurfaceCardColor, RoundedCornerShape(6.dp))
+                                .padding(8.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                    text = "P₁ = gcd(N,  Σ j=1⁶ ω_j · A₁(i, j))",
+                                color = PrimaryCyan,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
+
+                        Text(
+                            text = "• خط الاستقصاء الكاشف (Resonance Row): الصف ${analysis.resonanceVectorRow}",
+                            color = TextWhite,
+                            fontSize = 11.sp
+                        )
+                        Text(
+                            text = "• المجموع الموزون للصف الكاشف (Weighted Sum): ${String.format("%.15f", analysis.weightedSumRow)}",
+                            color = TextWhite,
+                            fontSize = 11.sp,
+                            fontFamily = FontFamily.Monospace
+                        )
+                        
+                        Divider(color = DarkGreyLine.copy(alpha = 0.5f), modifier = Modifier.padding(vertical = 4.dp))
+                        
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = if (displayLanguageAr) "تقرير التأويل الطوبولوجي الرقمي" else "Spectral Homology Interpretation Report",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = ElectricTeal,
-                                fontWeight = FontWeight.Bold
+                                text = "عامل الانهيار القاسمي المستنتج:",
+                                color = AccentGold,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 11.sp
                             )
-                            Icon(Icons.Default.Done, contentDescription = null, tint = CyberGreen, modifier = Modifier.size(16.dp))
+                            Text(
+                                text = analysis.collapsedFactor.toString(),
+                                color = AccentGold,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp,
+                                fontFamily = FontFamily.Monospace,
+                                textAlign = TextAlign.End,
+                                modifier = Modifier.weight(1f)
+                            )
                         }
-                        Spacer(modifier = Modifier.height(10.dp))
+                        
                         Text(
-                            text = uiState.aiAnalysisText,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = Color.White,
-                            lineHeight = 22.sp
+                            text = "عند هذا الانهيار الطيفي، ينتهي الطيف الموصوف لـ H_N عند التردد الهارمونيكي المطابق، مما يؤدي إلى H_N (mod P₁) → 0 تماماً كما تقتضي نظرية الاقتران الطيفي السعودي.",
+                            color = TextGrey,
+                            fontSize = 10.sp,
+                            lineHeight = 16.sp,
+                            modifier = Modifier.padding(top = 4.dp)
                         )
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun HistoryLogsCard(
-    historyList: List<SpectralRecord>,
-    onSelectRecord: (SpectralRecord) -> Unit,
-    onDeleteRecord: (Int) -> Unit,
-    onClearHistory: () -> Unit,
-    displayLanguageAr: Boolean
-) {
-    Card(
-        colors = CardDefaults.cardColors(containerColor = SlateDarkSurface),
-        shape = RoundedCornerShape(16.dp),
-        modifier = Modifier
-            .fillMaxWidth()
-            .border(1.dp, GridLineColor, RoundedCornerShape(16.dp))
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Icon(Icons.Default.List, contentDescription = "History", tint = ElectricTeal)
-                    Text(
-                        text = if (displayLanguageAr) "سجل المعمل والقياسات الطيفية السابقة" else "Laboratory Registry Logs",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White
-                    )
-                }
-
-                if (historyList.isNotEmpty()) {
-                    IconButton(
-                        onClick = onClearHistory,
-                        modifier = Modifier.testTag("clear_history_button")
-                    ) {
-                        Icon(Icons.Default.Delete, contentDescription = "Clear registry", tint = MaterialTheme.colorScheme.error)
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            if (historyList.isEmpty()) {
-                Text(
-                    text = if (displayLanguageAr) {
-                        "سجل المعمل فارغ. قم بإجراء دراسة طيفية أولى لتسجيل النتائج بـ Room DB."
-                    } else {
-                        "The laboratory registry is empty. Run analyses to preserve results."
-                    },
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = SoftGrayText,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 12.dp)
-                )
-            } else {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    historyList.take(6).forEach { record ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .background(Color(0xFF10161C), RoundedCornerShape(8.dp))
-                                .clickable { onSelectRecord(record) }
-                                .padding(10.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    Text(
-                                        text = "N = ${record.valueN}",
-                                        color = ElectricTeal,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 15.sp,
-                                        fontFamily = FontFamily.Monospace
-                                    )
-                                    Text(
-                                        text = record.modeName,
-                                        color = SoftGrayText,
-                                        fontSize = 10.sp,
-                                        modifier = Modifier
-                                            .background(Color(0xFF1E2833), RoundedCornerShape(4.dp))
-                                            .padding(horizontal = 4.dp, vertical = 1.dp)
-                                    )
-                                }
-                                Text(
-                                    text = "F(N) = ${record.factorsText}",
-                                    color = CyberGreen,
-                                    fontSize = 12.sp,
-                                    fontFamily = FontFamily.Monospace
-                                )
-                                Spacer(modifier = Modifier.height(2.dp))
-                                Text(
-                                    text = "Visibility: " + String.format(Locale.US, "%.3f", record.visibilityMetric) +
-                                            if (record.isOpacityTriggered) " (Blindspot)" else "",
-                                    color = if (record.isOpacityTriggered) AtomicOrange else SoftGrayText,
-                                    fontSize = 11.sp
-                                )
-                            }
-                            IconButton(onClick = { onDeleteRecord(record.id) }) {
-                                Icon(Icons.Default.Delete, contentDescription = "Delete record", tint = Color.Red.copy(alpha = 0.8f))
-                            }
-                        }
                     }
                 }
             }

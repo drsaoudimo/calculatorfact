@@ -11,6 +11,5 @@ data class SpectralRecord(
     val spectrumText: String,
     val visibilityMetric: Double,
     val isOpacityTriggered: Boolean,
-    val modeName: String,
     val timestamp: Long = System.currentTimeMillis()
 )

@@ -1,33 +1,41 @@
 package com.example.api
 
-import com.example.BuildConfig
-import com.squareup.moshi.JsonClass
-import com.squareup.moshi.Moshi
-import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
+import android.util.Log
+import com.google.gson.annotations.SerializedName
 import okhttp3.OkHttpClient
 import retrofit2.Retrofit
-import retrofit2.converter.moshi.MoshiConverterFactory
+import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.http.Body
 import retrofit2.http.POST
 import retrofit2.http.Query
-import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.math.BigInteger
 
-@JsonClass(generateAdapter = true)
-data class Part(val text: String)
+data class GenerateContentRequest(
+    val contents: List<Content>,
+    val generationConfig: GenerationConfig? = null
+)
 
-@JsonClass(generateAdapter = true)
-data class Content(val parts: List<Part>)
+data class Content(
+    val parts: List<Part>
+)
 
-@JsonClass(generateAdapter = true)
-data class GenerateContentRequest(val contents: List<Content>)
+data class Part(
+    val text: String? = null
+)
 
-@JsonClass(generateAdapter = true)
-data class Candidate(val content: Content)
+data class GenerationConfig(
+    val temperature: Float? = null
+)
 
-@JsonClass(generateAdapter = true)
-data class GenerateContentResponse(val candidates: List<Candidate>)
+data class GenerateContentResponse(
+    val candidates: List<Candidate>? = null
+)
+
+data class Candidate(
+    val content: Content
+)
 
 interface GeminiApiService {
     @POST("v1beta/models/gemini-3.5-flash:generateContent")
@@ -37,30 +45,40 @@ interface GeminiApiService {
     ): GenerateContentResponse
 }
 
-object GeminiClient {
+object RetrofitClient {
     private const val BASE_URL = "https://generativelanguage.googleapis.com/"
 
-    private val moshi = Moshi.Builder()
-        .addLast(KotlinJsonAdapterFactory())
-        .build()
-
     private val okHttpClient = OkHttpClient.Builder()
-        .connectTimeout(60, TimeUnit.SECONDS)
-        .readTimeout(60, TimeUnit.SECONDS)
-        .writeTimeout(60, TimeUnit.SECONDS)
+        .connectTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
+        .readTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
+        .writeTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
         .build()
 
     val service: GeminiApiService by lazy {
-        Retrofit.Builder()
+        val retrofit = Retrofit.Builder()
             .baseUrl(BASE_URL)
             .client(okHttpClient)
-            .addConverterFactory(MoshiConverterFactory.create(moshi))
+            .addConverterFactory(GsonConverterFactory.create())
             .build()
-            .create(GeminiApiService::class.java)
+        retrofit.create(GeminiApiService::class.java)
+    }
+}
+
+object GeminiClient {
+    private const val TAG = "GeminiClient"
+
+    private fun getApiKey(): String {
+        return try {
+            val clazz = Class.forName("com.example.BuildConfig")
+            val field = clazz.getField("GEMINI_API_KEY")
+            field.get(null) as? String ?: ""
+        } catch (e: Exception) {
+            ""
+        }
     }
 
     suspend fun generateAcademicAnalysis(
-        valueN: java.math.BigInteger,
+        valueN: BigInteger,
         factorsText: String,
         spectrum: DoubleArray,
         opacitySpectrum: DoubleArray,
@@ -68,9 +86,9 @@ object GeminiClient {
         isOpacityTriggered: Boolean,
         modeName: String
     ): String = withContext(Dispatchers.IO) {
-        val apiKey = BuildConfig.GEMINI_API_KEY
-        if (apiKey.isEmpty() || apiKey == "MY_GEMINI_API_KEY") {
-            return@withContext "عذراً، لم يتم ضبط مفتاح Gemini API في لوحة الأسرار (Secrets panel). يرجى تكوينه في الإعدادات لتفعيل التحليل الطيفي الطوبولوجي التلقائي."
+        val key = getApiKey()
+        if (key.isEmpty()) {
+            return@withContext "💡 [تنويه: مفتاح واجهة برمجة تطبيقات Gemini API غير مهيأ حالياً. لاستقبال تحليل ذكي تفصيلي مدعوم بالكامل بواسطة نماذج الذكاء الاصطناعي، يرجى تزويد مفتاح API الخاص بك في إعدادات التطبيق أو عبر لوحة الأسرار.]\n\nنظرة سريعة على النتائج المختبرية:\n• العدد المدروس: $valueN\n• العوامل الأولية: $factorsText\n• خريطة الترشيح: $modeName\n• مسافة الرؤية الطيفية: ${String.format("%.4f", visibility)}\n• حالة العتمة: ${if (isOpacityTriggered) "مفعلة (العدد أولي تماماً)" else "غير مفعلة"}"
         }
 
         val prompt = """
@@ -97,16 +115,17 @@ object GeminiClient {
             اكتب الرد بلغة عربية رسمية فخمة، علمية، خالية تماماً من الحشو والعبارات التعبيرية العامة، وركز بنسبة 100% على الصياغة الرياضية الدقيقة للتقارير المعملية المتينة!
         """.trimIndent()
 
-        val request = GenerateContentRequest(
-            contents = listOf(Content(parts = listOf(Part(text = prompt))))
-        )
-
         try {
-            val response = service.generateContent(apiKey, request)
-            response.candidates.firstOrNull()?.content?.parts?.firstOrNull()?.text 
-                ?: "عذراً، فشل استخراج نص التقرير العلمي من استجابة الذكاء الاصطناعي."
+            val request = GenerateContentRequest(
+                contents = listOf(Content(parts = listOf(Part(text = prompt)))),
+                generationConfig = GenerationConfig(temperature = 0.2f)
+            )
+            val response = RetrofitClient.service.generateContent(apiKey = key, request = request)
+            response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
+                ?: "عذراً، لم نتمكن من الحصول على استجابة طيفية من الخادم."
         } catch (e: Exception) {
-            "فشل الاتصال بخدمة تحليل الذكاء الاصطناعي: ${e.localizedMessage}"
+            Log.e(TAG, "Error generating AI academic interpretation", e)
+            "حدث خطأ أثناء إجراء التحليل الرياضي الذكي: ${e.localizedMessage}"
         }
     }
 }

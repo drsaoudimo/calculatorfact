@@ -1,184 +1,190 @@
 package com.example.viewmodel
 
-import android.app.Application
-import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.example.api.GeminiClient
-import com.example.db.AppDatabase
 import com.example.db.SpectralRecord
 import com.example.db.SpectralRepository
 import com.example.math.RowRepresentativeMode
 import com.example.math.SDIMath
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.math.BigInteger
 
 data class SpectralUiState(
-    val inputN: String = "2026",
-    val selectedMode: RowRepresentativeMode = RowRepresentativeMode.ROW_GCD,
-    val isCalculating: Boolean = false,
+    val inputN: String = "220",
+    val selectedMode: RowRepresentativeMode = RowRepresentativeMode.PRIMES,
+    val isLoading: Boolean = false,
     val error: String? = null,
     
-    // Results
-    val activeN: java.math.BigInteger? = null,
-    val primeFactors: Map<java.math.BigInteger, Int> = emptyMap(),
+    // Calculated numerical outputs
+    val activeN: BigInteger? = null,
+    val primeFactors: Map<BigInteger, Int> = emptyMap(),
     val factorsText: String = "",
     val currentSpectrum: DoubleArray = DoubleArray(6),
     val baselineSpectrum: DoubleArray = DoubleArray(6),
-    val visibilityDistance: Double = 0.0,
+    val visibilityMetric: Double = 0.0,
     val isOpacityTriggered: Boolean = false,
+    val semiprimeAnalysis: SDIMath.SemiprimeAnalysis? = null,
     
-    // AI Rapport
-    val aiAnalysisText: String = "",
-    val isAiLoading: Boolean = false
+    // AI Explanations
+    val isAiLoading: Boolean = false,
+    val aiExplanation: String = "",
+    
+    // Local persistence history
+    val inspectionHistory: List<SpectralRecord> = emptyList()
 )
 
-class SpectralViewModel(application: Application) : AndroidViewModel(application) {
-
-    private val database = AppDatabase.getDatabase(application)
-    private val repository = SpectralRepository(database.spectralDao())
+class SpectralViewModel(private val repository: SpectralRepository) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SpectralUiState())
     val uiState: StateFlow<SpectralUiState> = _uiState.asStateFlow()
 
-    // Expose database history to UI reactively
-    val historyList: StateFlow<List<SpectralRecord>> = repository.allRecords
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
-            initialValue = emptyList()
-        )
-
     init {
-        // Run initial calculation for 2026
-        calculateSpectralAttributes("2026")
+        // Collect local history reactively from repository
+        viewModelScope.launch {
+            repository.allRecords.collect { records ->
+                _uiState.update { it.copy(inspectionHistory = records) }
+            }
+        }
+        
+        // Initial run with default N
+        calculateSpectralAttributes(_uiState.value.inputN)
     }
 
-    fun updateInput(input: String) {
-        _uiState.update { it.copy(inputN = input, error = null) }
+    fun updateInput(newInput: String) {
+        _uiState.update { it.copy(inputN = newInput, error = null) }
     }
 
-    fun selectMode(mode: RowRepresentativeMode) {
+    fun updateMode(mode: RowRepresentativeMode) {
         _uiState.update { it.copy(selectedMode = mode) }
-        _uiState.value.activeN?.let {
-            calculateSpectralAttributes(it.toString())
-        }
+        calculateSpectralAttributes(_uiState.value.inputN)
     }
 
-    fun triggerCalculation() {
-        val input = _uiState.value.inputN.trim()
-        if (input.isEmpty()) {
-            _uiState.update { it.copy(error = "أدخل قيمة عددية صحيحة أولاً") }
-            return
+    fun executeSpectralAnalysis(customInput: String? = null) {
+        if (customInput != null) {
+            _uiState.update { it.copy(inputN = customInput) }
         }
-        calculateSpectralAttributes(input)
+        calculateSpectralAttributes(_uiState.value.inputN)
+    }
+
+    private fun sanitizeInput(input: String): String {
+        var sanitized = input.replace("[,\\s_\\.\\-\\(\\)\\[\\]\\u200E\\u200F\\u202A-\\u202E]".toRegex(), "")
+        val arabicDigits = charArrayOf('٠', '١', '٢', '٣', '٤', '٥', '٦', '٧', '٨', '٩')
+        for (i in 0..9) {
+            sanitized = sanitized.replace(arabicDigits[i], '0' + i)
+        }
+        return sanitized
     }
 
     private fun calculateSpectralAttributes(inputString: String) {
         viewModelScope.launch(Dispatchers.Default) {
+            _uiState.update { it.copy(isLoading = true, error = null) }
+            
+            val sanitized = sanitizeInput(inputString)
             val nVal = try {
-                java.math.BigInteger(inputString.trim())
+                BigInteger(sanitized)
             } catch (e: Exception) {
                 null
             }
-            if (nVal == null || nVal <= java.math.BigInteger.ZERO) {
-                _uiState.update { it.copy(error = "الرجاء إدخال عدد طبيعي صحيح موجب أكبر من الصفر") }
+            
+            if (nVal == null || nVal <= BigInteger.ZERO) {
+                _uiState.update { 
+                    it.copy(
+                        isLoading = false, 
+                        error = "الرجاء إدخال عدد طبيعي صحيح موجب أكبر من الصفر"
+                    ) 
+                }
                 return@launch
             }
 
-            _uiState.update { it.copy(isCalculating = true, error = null, aiAnalysisText = "") }
+            // High-speed prime factorization
+            val factors = SDIMath.factorise(nVal)
+            val factorsStr = SDIMath.factorsToString(factors)
 
-            try {
-                // Factorization
-                val factors = SDIMath.factorise(nVal)
-                val factorsStr = SDIMath.factorsToString(factors)
+            // Diagnostic matrices computation
+            val mode = _uiState.value.selectedMode
+            val dn = SDIMath.computeDN(nVal, mode)
+            val hn = SDIMath.computeHN(dn)
+            val spectrum = SDIMath.computeEigenvalues(hn)
 
-                // Matrix and Operator calculations
-                val mode = _uiState.value.selectedMode
-                val dn = SDIMath.computeDN(nVal, mode)
-                val hn = SDIMath.computeHN(dn)
+            // Baseline matrix (coprime / fully opaque N reference)
+            val baseDn = DoubleArray(19) { 1.0 }
+            val baseHn = SDIMath.computeHN(baseDn)
+            val baselineSpectrum = SDIMath.computeEigenvalues(baseHn)
 
-                val spectrum = SDIMath.solveEigenvalues(hn)
-                val opacitySpectrum = SDIMath.computeOpacitySpectrum(mode)
-                val visibility = SDIMath.calculateVisibilityDistance(spectrum, opacitySpectrum)
+            // Visibility Metric and complete Opacity boundary triggers
+            val visibility = SDIMath.computeSpectralVisibility(spectrum, baselineSpectrum)
+            val isOpacityTriggered = SDIMath.isSpectralOpacityTriggered(nVal)
 
-                val opacityTriggered = SDIMath.isSpectralOpacityTriggered(nVal)
+            // Robust math solver representation for semiprimes/composites
+            val semiprime = SDIMath.analyzeSemiprime(nVal, mode)
 
-                _uiState.update {
-                    it.copy(
-                        isCalculating = false,
-                        activeN = nVal,
-                        primeFactors = factors,
-                        factorsText = factorsStr,
-                        currentSpectrum = spectrum,
-                        baselineSpectrum = opacitySpectrum,
-                        visibilityDistance = visibility,
-                        isOpacityTriggered = opacityTriggered
-                    )
-                }
-
-                // Autopersist successful scan to database
-                val record = SpectralRecord(
-                    valueN = nVal.toString(),
+            _uiState.update {
+                it.copy(
+                    isLoading = false,
+                    activeN = nVal,
+                    primeFactors = factors,
                     factorsText = factorsStr,
-                    spectrumText = spectrum.joinToString(",") { String.format("%.2f", it) },
+                    currentSpectrum = spectrum,
+                    baselineSpectrum = baselineSpectrum,
                     visibilityMetric = visibility,
-                    isOpacityTriggered = opacityTriggered,
-                    modeName = mode.displayNameAr
+                    isOpacityTriggered = isOpacityTriggered,
+                    semiprimeAnalysis = semiprime,
+                    aiExplanation = "" // Reset explanation when new N is analyzed
                 )
-                repository.insertRecord(record)
-
-            } catch (e: Exception) {
-                _uiState.update {
-                    it.copy(
-                        isCalculating = false,
-                        error = "حدث خطأ أثناء الحسابات الطيفية: ${e.localizedMessage}"
-                    )
-                }
             }
+
+            // Save trace records safely inside database
+            val record = SpectralRecord(
+                valueN = nVal.toString(),
+                factorsText = factorsStr,
+                spectrumText = spectrum.joinToString(",") { String.format("%.2f", it) },
+                visibilityMetric = visibility,
+                isOpacityTriggered = isOpacityTriggered
+            )
+            repository.insertRecord(record)
         }
     }
 
-    fun requestAiAnalysis() {
+    fun requestAiInsight() {
         val state = _uiState.value
-        val activeN = state.activeN ?: return
-
-        _uiState.update { it.copy(isAiLoading = true) }
+        val activeNVal = state.activeN ?: return
 
         viewModelScope.launch {
-            val analysis = GeminiClient.generateAcademicAnalysis(
-                valueN = activeN,
+            _uiState.update { it.copy(isAiLoading = true) }
+            
+            val summaryText = GeminiClient.generateAcademicAnalysis(
+                valueN = activeNVal,
                 factorsText = state.factorsText,
                 spectrum = state.currentSpectrum,
                 opacitySpectrum = state.baselineSpectrum,
-                visibility = state.visibilityDistance,
+                visibility = state.visibilityMetric,
                 isOpacityTriggered = state.isOpacityTriggered,
-                modeName = state.selectedMode.displayNameAr
+                modeName = state.selectedMode.name
             )
-            _uiState.update { it.copy(isAiLoading = false, aiAnalysisText = analysis) }
-        }
-    }
 
-    fun deleteHistoryRecord(id: Int) {
-        viewModelScope.launch {
-            repository.deleteRecord(id)
+            _uiState.update {
+                it.copy(
+                    isAiLoading = false,
+                    aiExplanation = summaryText
+                )
+            }
         }
     }
 
     fun loadFromHistory(record: SpectralRecord) {
-        val mode = RowRepresentativeMode.values().find { it.displayNameAr == record.modeName } 
-            ?: RowRepresentativeMode.ROW_GCD
-
+        val mode = _uiState.value.selectedMode
         _uiState.update {
             it.copy(
                 inputN = record.valueN,
                 selectedMode = mode,
-                aiAnalysisText = ""
+                aiExplanation = ""
             )
         }
         calculateSpectralAttributes(record.valueN)
@@ -186,7 +192,17 @@ class SpectralViewModel(application: Application) : AndroidViewModel(application
 
     fun clearHistory() {
         viewModelScope.launch {
-            repository.clearHistory()
+            repository.clearAll()
         }
+    }
+}
+
+class SpectralViewModelFactory(private val repository: SpectralRepository) : ViewModelProvider.Factory {
+    override fun <T : ViewModel> create(modelClass: Class<T>): T {
+        if (modelClass.isAssignableFrom(SpectralViewModel::class.java)) {
+            @Suppress("UNCHECKED_CAST")
+            return SpectralViewModel(repository) as T
+        }
+        throw IllegalArgumentException("Unknown ViewModel class")
     }
 }

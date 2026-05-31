@@ -1,6 +1,9 @@
 package com.example.db
 
-import androidx.room.*
+import androidx.room.Dao
+import androidx.room.Insert
+import androidx.room.OnConflictStrategy
+import androidx.room.Query
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -11,9 +14,6 @@ interface SpectralDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertRecord(record: SpectralRecord)
 
-    @Query("DELETE FROM spectral_records WHERE id = :id")
-    suspend fun deleteRecordById(id: Int)
-
     @Query("DELETE FROM spectral_records")
-    suspend fun clearAllRecords()
+    suspend fun clearAll()
 }
