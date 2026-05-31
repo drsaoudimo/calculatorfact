@@ -77,6 +77,60 @@ object GeminiClient {
         }
     }
 
+    suspend fun factorizeWithGemini(nVal: BigInteger): Pair<BigInteger, BigInteger>? = withContext(Dispatchers.IO) {
+        val key = getApiKey()
+        if (key.isEmpty()) return@withContext null
+
+        val prompt = """
+            You are a supercomputer prime factorization service and expert mathematician.
+            Factorize the following semiprime number N into its two prime factors p1 and p2:
+            N = $nVal
+            
+            Respond strictly in valid JSON format. Do not write any markdown code block indicators, backticks, or conversational text. Your response must be parsed directly as a JSON object of this exact structure:
+            {
+               "success": true,
+               "p1": "factor1",
+               "p2": "factor2"
+            }
+            If you do not know the factorization or cannot find it, write:
+            {
+               "success": false
+            }
+        """.trimIndent()
+
+        try {
+            val request = GenerateContentRequest(
+                contents = listOf(Content(parts = listOf(Part(text = prompt)))),
+                generationConfig = GenerationConfig(temperature = 0.0f)
+            )
+            val response = RetrofitClient.service.generateContent(apiKey = key, request = request)
+            var text = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text ?: ""
+            
+            // Clean markdown blocks if present
+            text = text.trim()
+            if (text.startsWith("```")) {
+                text = text.removePrefix("```json").removePrefix("```")
+                if (text.endsWith("```")) {
+                    text = text.removeSuffix("```")
+                }
+                text = text.trim()
+            }
+            
+            val jsonObject = com.google.gson.JsonParser.parseString(text).asJsonObject
+            val success = jsonObject.get("success")?.asBoolean ?: false
+            if (success) {
+                val p1Str = jsonObject.get("p1")?.asString ?: ""
+                val p2Str = jsonObject.get("p2")?.asString ?: ""
+                if (p1Str.isNotEmpty() && p2Str.isNotEmpty()) {
+                    Pair(BigInteger(p1Str), BigInteger(p2Str))
+                } else null
+            } else null
+        } catch (e: Exception) {
+            Log.e(TAG, "Error factorizing with AI", e)
+            null
+        }
+    }
+
     suspend fun generateAcademicAnalysis(
         valueN: BigInteger,
         factorsText: String,

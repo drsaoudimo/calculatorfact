@@ -54,6 +54,13 @@ object SDIMath {
         )
     )
 
+    // Dynamic cache to store prime factors discovered via Gemini or manual override
+    private val dynamicFactorCache = java.util.concurrent.ConcurrentHashMap<BigInteger, List<BigInteger>>()
+
+    fun registerDynamicFactorization(n: BigInteger, p1: BigInteger, p2: BigInteger) {
+        dynamicFactorCache[n] = listOf(p1, p2)
+    }
+
     // Primes lazy sieve generator up to 150,000 to eliminate small prime factors in milliseconds
     private val smallPrimesList: List<Int> by lazy {
         val limit = 150000
@@ -89,6 +96,15 @@ object SDIMath {
                 }
                 return factors
             }
+        }
+
+        // Check dynamic AI or manual cache
+        val cached = dynamicFactorCache[n]
+        if (cached != null) {
+            for (prime in cached) {
+                factors[prime] = 1
+            }
+            return factors
         }
         
         factorizeRecursive(n, factors)

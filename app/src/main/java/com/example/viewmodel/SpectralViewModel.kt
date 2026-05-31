@@ -73,6 +73,26 @@ class SpectralViewModel(private val repository: SpectralRepository) : ViewModel(
         calculateSpectralAttributes(_uiState.value.inputN)
     }
 
+    fun registerManualFactors(nStr: String, p1Str: String, p2Str: String) {
+        val sanitizedN = sanitizeInput(nStr)
+        val sanitizedP1 = sanitizeInput(p1Str)
+        val sanitizedP2 = sanitizeInput(p2Str)
+        try {
+            val nVal = BigInteger(sanitizedN)
+            val p1Val = BigInteger(sanitizedP1)
+            val p2Val = BigInteger(sanitizedP2)
+            if (p1Val.multiply(p2Val) == nVal) {
+                SDIMath.registerDynamicFactorization(nVal, p1Val, p2Val)
+                _uiState.update { it.copy(inputN = nStr) }
+                calculateSpectralAttributes(nStr)
+            } else {
+                _uiState.update { it.copy(error = "تنبيه: حاصل ضرب العاملين لا يساوي العدد الهدف N!") }
+            }
+        } catch (e: Exception) {
+            _uiState.update { it.copy(error = "الرجاء إدخال أرقام صحيحة صالحة للمطابقة") }
+        }
+    }
+
     private fun sanitizeInput(input: String): String {
         var sanitized = input.replace("[,\\s_\\.\\-\\(\\)\\[\\]\\u200E\\u200F\\u202A-\\u202E]".toRegex(), "")
         val arabicDigits = charArrayOf('٠', '١', '٢', '٣', '٤', '٥', '٦', '٧', '٨', '٩')
@@ -104,7 +124,18 @@ class SpectralViewModel(private val repository: SpectralRepository) : ViewModel(
             }
 
             // High-speed prime factorization
-            val factors = SDIMath.factorise(nVal)
+            var factors = SDIMath.factorise(nVal)
+
+            // Dynamic AI Factorization for extremely large composites / semiprimes
+            val isCompositeButUnfactored = nVal.isProbablePrime(25) == false && (factors.size == 1 && factors.containsKey(nVal))
+            if (isCompositeButUnfactored) {
+                val aiFactors = com.example.api.GeminiClient.factorizeWithGemini(nVal)
+                if (aiFactors != null) {
+                    SDIMath.registerDynamicFactorization(nVal, aiFactors.first, aiFactors.second)
+                    factors = SDIMath.factorise(nVal)
+                }
+            }
+
             val factorsStr = SDIMath.factorsToString(factors)
 
             // Diagnostic matrices computation

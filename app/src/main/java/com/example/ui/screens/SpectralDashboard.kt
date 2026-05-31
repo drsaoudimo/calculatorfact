@@ -90,6 +90,7 @@ fun SpectralDashboard(
                         selectedMode = uiState.selectedMode,
                         onModeChange = { viewModel.updateMode(it) },
                         onAnalyzeClick = { viewModel.executeSpectralAnalysis(inputTemp) },
+                        onRegisterManualFactors = { p1, p2 -> viewModel.registerManualFactors(inputTemp, p1, p2) },
                         isLoading = uiState.isLoading,
                         errorMsg = uiState.error
                     )
@@ -208,6 +209,7 @@ fun AnalysisInputCard(
     selectedMode: RowRepresentativeMode,
     onModeChange: (RowRepresentativeMode) -> Unit,
     onAnalyzeClick: () -> Unit,
+    onRegisterManualFactors: (String, String) -> Unit,
     isLoading: Boolean,
     errorMsg: String?
 ) {
@@ -271,6 +273,94 @@ fun AnalysisInputCard(
                     fontSize = 12.sp,
                     modifier = Modifier.padding(horizontal = 4.dp)
                 )
+            }
+
+            Divider(color = DarkGreyLine)
+
+            // Optional Manual Overrides
+            var showManualOverrides by remember { mutableStateOf(false) }
+            var manualP1 by remember { mutableStateOf("") }
+            var manualP2 by remember { mutableStateOf("") }
+
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { showManualOverrides = !showManualOverrides }
+                        .padding(vertical = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "خيارات الإدخال اليدوي المتقدمة للعوامل",
+                        color = AccentGold,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Icon(
+                        imageVector = if (showManualOverrides) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                        contentDescription = "قائمة منسدلة",
+                        tint = AccentGold,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+
+                if (showManualOverrides) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = manualP1,
+                            onValueChange = { manualP1 = it },
+                            label = { Text("عامل أول p1 (الأصغر)", color = TextGrey, fontSize = 11.sp) },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = TextWhite,
+                                unfocusedTextColor = TextWhite,
+                                focusedBorderColor = AccentGold,
+                                unfocusedBorderColor = DarkGreyLine,
+                                focusedContainerColor = BackgroundColor,
+                                unfocusedContainerColor = BackgroundColor
+                            )
+                        )
+
+                        OutlinedTextField(
+                            value = manualP2,
+                            onValueChange = { manualP2 = it },
+                            label = { Text("عامل ثانٍ p2 (الأكبر)", color = TextGrey, fontSize = 11.sp) },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = TextWhite,
+                                unfocusedTextColor = TextWhite,
+                                focusedBorderColor = AccentGold,
+                                unfocusedBorderColor = DarkGreyLine,
+                                focusedContainerColor = BackgroundColor,
+                                unfocusedContainerColor = BackgroundColor
+                            )
+                        )
+
+                        Button(
+                            onClick = { onRegisterManualFactors(manualP1, manualP2) },
+                            colors = ButtonDefaults.buttonColors(containerColor = AccentGold),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.fillMaxWidth().height(40.dp)
+                        ) {
+                            Text(
+                                text = "التحليل بالعوامل الموصوفة يدوياً",
+                                color = BackgroundColor,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp
+                            )
+                        }
+                    }
+                }
             }
 
             Divider(color = DarkGreyLine)
