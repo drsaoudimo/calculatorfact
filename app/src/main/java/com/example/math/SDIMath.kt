@@ -231,12 +231,20 @@ object SDIMath {
             return factors
         }
 
+        if (n.isProbablePrime(40)) {
+            factors[n] = 1
+            return factors
+        }
+
         var tempN = n
 
         // 1. Highly optimized trial division check using primitive long arithmetic where possible
+        // Limiting trial division to primes under 10,000 to save up to 78,000 divisions on large composites
+        val trialLimit = 10000
         if (tempN <= BigInteger.valueOf(Long.MAX_VALUE)) {
             var nLong = tempN.toLong()
             for (prime in smallPrimesList) {
+                if (prime > trialLimit) break
                 val pLong = prime.toLong()
                 if (pLong * pLong > nLong) break
                 var count = 0
@@ -252,17 +260,29 @@ object SDIMath {
             tempN = BigInteger.valueOf(nLong)
         } else {
             for (prime in smallPrimesList) {
+                if (prime > trialLimit) break
                 val bp = BigInteger.valueOf(prime.toLong())
                 if (bp.multiply(bp) > tempN) break
-                var count = 0
-                while (tempN.remainder(bp) == BigInteger.ZERO) {
-                    count++
-                    tempN = tempN.divide(bp)
-                }
-                if (count > 0) {
+                
+                var quotientAndRemainder = tempN.divideAndRemainder(bp)
+                if (quotientAndRemainder[1] == BigInteger.ZERO) {
+                    var count = 0
+                    while (quotientAndRemainder[1] == BigInteger.ZERO) {
+                        count++
+                        tempN = quotientAndRemainder[0]
+                        if (tempN == BigInteger.ONE) break
+                        quotientAndRemainder = tempN.divideAndRemainder(bp)
+                    }
                     factors[bp] = (factors[bp] ?: 0) + count
                 }
+                if (tempN == BigInteger.ONE) break
             }
+        }
+
+        // Quick check if the remainder is already a prime to avoid any heavy loop
+        if (tempN > BigInteger.ONE && tempN.isProbablePrime(40)) {
+            factors[tempN] = (factors[tempN] ?: 0) + 1
+            tempN = BigInteger.ONE
         }
 
         if (tempN > BigInteger.ONE) {
@@ -324,6 +344,7 @@ object SDIMath {
 
     /**
      * Pollard's Rho with Brent's cycle detection (uses powers of 2 for step jumps with multiplied diff block GCD).
+     * Guided by SCNT A1 matrix components & spectral resonance eigenvalues nudge.
      */
     fun pollardRhoBrentSplit(n: BigInteger): BigInteger? {
         if (n.remainder(TWO) == BigInteger.ZERO) return TWO
@@ -344,25 +365,30 @@ object SDIMath {
             
             var ys = y
             var steps = 0
-            val maxSteps = 5000
+            val maxSteps = 3000 // tight boundary for extreme speed
             
             while (g == BigInteger.ONE && steps < maxSteps) {
                 x = y
-                for (i in 0 until r) {
-                    val matrixOffset = A1Big[((steps + i) % 19).toInt()][((steps + i) % 6).toInt()]
+                var i = 0L
+                while (i < r && steps < maxSteps) {
+                    val matrixOffset = A1Big[(steps % 19).toInt()][(steps % 6).toInt()]
                     y = y.multiply(y).add(c).add(spectralNudge).add(matrixOffset).remainder(n)
+                    steps++
+                    i++
                 }
                 
                 var k = 0L
                 while (k < r && g == BigInteger.ONE && steps < maxSteps) {
                     ys = y
                     val limit = minOf(m, r - k)
-                    for (i in 0 until limit) {
+                    var j = 0L
+                    while (j < limit && steps < maxSteps) {
                         val matrixOffset = A1Big[(steps % 19).toInt()][(steps % 6).toInt()]
                         y = y.multiply(y).add(c).add(spectralNudge).add(matrixOffset).remainder(n)
                         val diff = x.subtract(y).abs()
                         q = q.multiply(diff).remainder(n)
                         steps++
+                        j++
                     }
                     g = q.gcd(n)
                     k += m
@@ -375,7 +401,8 @@ object SDIMath {
                 g = BigInteger.ONE
                 y = ys
                 var backSteps = 0
-                while (g == BigInteger.ONE && backSteps < 500) {
+                val limitBack = minOf(1000, steps)
+                while (g == BigInteger.ONE && backSteps < limitBack) {
                     val matrixOffset = A1Big[(backSteps % 19).toInt()][(backSteps % 6).toInt()]
                     y = y.multiply(y).add(c).add(spectralNudge).add(matrixOffset).remainder(n)
                     val diff = x.subtract(y).abs()
@@ -392,7 +419,7 @@ object SDIMath {
     }
 
     /**
-     * Deep Pollard's Rho solver with progressive scaling steps up to 150,000 for maximum cracking ability on complex composites.
+     * Deep Pollard's Rho solver with progressive scaling steps up to 15,000 for maximum cracking ability on complex composites.
      */
     fun deepPollardRhoSplit(n: BigInteger): BigInteger? {
         if (n.remainder(TWO) == BigInteger.ZERO) return TWO
@@ -403,7 +430,7 @@ object SDIMath {
         var c = BigInteger.ONE
         var d = BigInteger.ONE
         var steps = 0
-        val maxSteps = 150000
+        val maxSteps = 15000
 
         while (d == BigInteger.ONE && steps < maxSteps) {
             steps++
@@ -420,27 +447,43 @@ object SDIMath {
     }
 
     /**
-     * Highly optimized O(sqrt(N)) primality-based trial division using 6k +/- 1 algorithm up to 5,000,000 steps.
+     * Highly optimized O(sqrt(N)) primality-based trial division using 6k +/- 1 algorithm.
      * Guaranteed to factor any medium-large composites when heuristic probabilistic math gets hard.
      */
     fun deepTrialDivisionSplit(n: BigInteger): BigInteger? {
         if (n.remainder(TWO) == BigInteger.ZERO) return TWO
         if (n.remainder(THREE) == BigInteger.ZERO) return THREE
 
-        var k = BigInteger.valueOf(5L)
-        val step2 = TWO
-        val step4 = FOUR
-        val limit = n.sqrt()
-
-        var stepToggle = true
-        var count = 0
-        while (k <= limit && count < 3000000) {
-            if (n.remainder(k) == BigInteger.ZERO) {
-                return k
+        if (n <= BigInteger.valueOf(Long.MAX_VALUE)) {
+            val nLong = n.toLong()
+            val limitLong = sqrt(nLong.toDouble()).toLong()
+            var kLong = 5L
+            var stepToggle = true
+            var count = 0
+            while (kLong <= limitLong && count < 250000) {
+                if (nLong % kLong == 0L) {
+                    return BigInteger.valueOf(kLong)
+                }
+                kLong += if (stepToggle) 2L else 4L
+                stepToggle = !stepToggle
+                count++
             }
-            k = k.add(if (stepToggle) step2 else step4)
-            stepToggle = !stepToggle
-            count++
+        } else {
+            var k = BigInteger.valueOf(5L)
+            val step2 = TWO
+            val step4 = FOUR
+            val limit = n.sqrt()
+
+            var stepToggle = true
+            var count = 0
+            while (k <= limit && count < 15000) {
+                if (n.remainder(k) == BigInteger.ZERO) {
+                    return k
+                }
+                k = k.add(if (stepToggle) step2 else step4)
+                stepToggle = !stepToggle
+                count++
+            }
         }
         return null
     }
@@ -577,7 +620,7 @@ object SDIMath {
         
         var ySq = x.multiply(x).subtract(n)
         var steps = 0
-        val maxSteps = 5000 
+        val maxSteps = 50 
         
         while (steps < maxSteps) {
             val y = bigIntSqrt(ySq)

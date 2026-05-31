@@ -16,6 +16,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
 import java.math.BigInteger
 
 enum class RowRepresentativeMode {
@@ -99,87 +101,82 @@ class SpectralViewModel(application: Application) : AndroidViewModel(application
                     return@launch
                 }
 
-                // 1. Initial High-speed prime factorization
-                var factors = SDIMath.factorise(nVal)
+                // Move off-thread to Dispatchers.Default for ultimate responsiveness and to prevent any freeze/ANR
+                val (factors, mepa) = withContext(Dispatchers.Default) {
+                    var currentFactors = SDIMath.factorise(nVal)
+                    var hasComposite = currentFactors.keys.any { !it.isProbablePrime(30) }
 
-                // 2. Continuous Decomposer for non-prime limits / composite factors
-                var hasComposite = factors.keys.any { !it.isProbablePrime(30) }
+                    while (hasComposite) {
+                        val compositeFactor = currentFactors.keys.first { !it.isProbablePrime(30) }
+                        
+                        var divisor: BigInteger? = SDIMath.qmfgSpectralSplit(compositeFactor)
+                        
+                        if (divisor == null) {
+                            divisor = SDIMath.fermatSplit(compositeFactor)
+                        }
+                        if (divisor == null) {
+                            divisor = SDIMath.pollardRhoBrentSplit(compositeFactor)
+                        }
+                        if (divisor == null) {
+                            divisor = SDIMath.ecmSplit(compositeFactor)
+                        }
+                        if (divisor == null) {
+                            divisor = SDIMath.pollardRhoSplit(compositeFactor)
+                        }
 
-                while (hasComposite) {
-                    // Identify the non-prime factor
-                    val compositeFactor = factors.keys.first { !it.isProbablePrime(30) }
-                    
-                    // A. Try high-performance local mathematical splitters first
-                    var divisor: BigInteger? = SDIMath.qmfgSpectralSplit(compositeFactor)
-                    
-                    if (divisor == null) {
-                        divisor = SDIMath.fermatSplit(compositeFactor)
-                    }
-                    if (divisor == null) {
-                        divisor = SDIMath.pollardRhoBrentSplit(compositeFactor)
-                    }
-                    if (divisor == null) {
-                        divisor = SDIMath.ecmSplit(compositeFactor)
-                    }
-                    if (divisor == null) {
-                        divisor = SDIMath.pollardRhoSplit(compositeFactor)
-                    }
-
-                    if (divisor == null) {
-                        // B. Fallback to advanced AI factorization
-                        var aiResolved = GeminiClient.factorizeWithGemini(compositeFactor)
-                        if (aiResolved != null && aiResolved.first.multiply(aiResolved.second) == compositeFactor && aiResolved.first > BigInteger.ONE && aiResolved.second > BigInteger.ONE) {
-                            divisor = aiResolved.first
-                        } else {
-                            // Retry Gemini up to 2 times to ensure robustness
-                            for (retry in 1..2) {
-                                aiResolved = GeminiClient.factorizeWithGemini(compositeFactor)
-                                if (aiResolved != null && aiResolved.first.multiply(aiResolved.second) == compositeFactor && aiResolved.first > BigInteger.ONE && aiResolved.second > BigInteger.ONE) {
-                                    divisor = aiResolved.first
-                                    break
+                        if (divisor == null) {
+                            var aiResolved = GeminiClient.factorizeWithGemini(compositeFactor)
+                            if (aiResolved != null && aiResolved.first.multiply(aiResolved.second) == compositeFactor && aiResolved.first > BigInteger.ONE && aiResolved.second > BigInteger.ONE) {
+                                divisor = aiResolved.first
+                            } else {
+                                for (retry in 1..2) {
+                                    aiResolved = GeminiClient.factorizeWithGemini(compositeFactor)
+                                    if (aiResolved != null && aiResolved.first.multiply(aiResolved.second) == compositeFactor && aiResolved.first > BigInteger.ONE && aiResolved.second > BigInteger.ONE) {
+                                        divisor = aiResolved.first
+                                        break
+                                    }
                                 }
                             }
                         }
-                    }
 
-                    // C. Deep fallback mathematical splitters
-                    if (divisor == null) {
-                        divisor = SDIMath.deepPollardRhoSplit(compositeFactor)
-                    }
-                    if (divisor == null) {
-                        divisor = SDIMath.deepTrialDivisionSplit(compositeFactor)
-                    }
+                        if (divisor == null) {
+                            divisor = SDIMath.deepPollardRhoSplit(compositeFactor)
+                        }
+                        if (divisor == null) {
+                            divisor = SDIMath.deepTrialDivisionSplit(compositeFactor)
+                        }
 
-                    if (divisor != null && divisor != BigInteger.ONE && divisor != compositeFactor) {
-                        val p1 = divisor
-                        val p2 = compositeFactor.divide(divisor)
-                        SDIMath.registerDynamicFactorization(compositeFactor, p1, p2)
-                        factors = SDIMath.factorise(nVal)
-                    } else {
-                        // Exhaustive brute-force fallback on odd numbers if somehow mathematically stuck
-                        var fallbackDivisor: BigInteger? = null
-                        var testD = BigInteger.valueOf(3L)
-                        while (testD * testD <= compositeFactor) {
-                            if (compositeFactor.remainder(testD) == BigInteger.ZERO) {
-                                fallbackDivisor = testD
+                        if (divisor != null && divisor != BigInteger.ONE && divisor != compositeFactor) {
+                            val p1 = divisor
+                            val p2 = compositeFactor.divide(divisor)
+                            SDIMath.registerDynamicFactorization(compositeFactor, p1, p2)
+                            currentFactors = SDIMath.factorise(nVal)
+                        } else {
+                            var fallbackDivisor: BigInteger? = null
+                            var testD = BigInteger.valueOf(3L)
+                            var countSteps = 0
+                            while (testD * testD <= compositeFactor && countSteps < 50000) {
+                                if (compositeFactor.remainder(testD) == BigInteger.ZERO) {
+                                    fallbackDivisor = testD
+                                    break
+                                }
+                                testD = testD.add(SDIMath.TWO)
+                                countSteps++
+                            }
+                            if (fallbackDivisor != null) {
+                                SDIMath.registerDynamicFactorization(compositeFactor, fallbackDivisor, compositeFactor.divide(fallbackDivisor))
+                                currentFactors = SDIMath.factorise(nVal)
+                            } else {
                                 break
                             }
-                            testD = testD.add(SDIMath.TWO)
                         }
-                        if (fallbackDivisor != null) {
-                            SDIMath.registerDynamicFactorization(compositeFactor, fallbackDivisor, compositeFactor.divide(fallbackDivisor))
-                            factors = SDIMath.factorise(nVal)
-                        } else {
-                            break
-                        }
+                        hasComposite = currentFactors.keys.any { !it.isProbablePrime(30) }
                     }
-                    hasComposite = factors.keys.any { !it.isProbablePrime(30) }
+                    val matrixMEPA = SDIMath.computeMepaDiagnostics(currentFactors)
+                    Pair(currentFactors, matrixMEPA)
                 }
 
                 val factorsStr = SDIMath.factorsToString(factors)
-
-                // 3. Compute diagnostic energetic matrices
-                val mepa = SDIMath.computeMepaDiagnostics(factors)
 
                 // 4. Generate scholarly Homology / TDA analysis from Gemini
                 val academicReport = GeminiClient.generateAcademicAnalysis(
@@ -248,84 +245,92 @@ class SpectralViewModel(application: Application) : AndroidViewModel(application
             try {
                 val inputNVal = BigInteger(sanitizeInput(_uiState.value.inputN))
                 
-                // Keep decomposing until this sub-tree has no composite factors left
-                val tempCompositeList = mutableListOf(composite)
-                var solvedAny = false
-                
-                while (tempCompositeList.isNotEmpty()) {
-                    val currentComp = tempCompositeList.removeAt(0)
-                    if (currentComp.isProbablePrime(30)) continue
+                // Offload sub-tree factorization to background thread as well
+                val solvedAny = withContext(Dispatchers.Default) {
+                    val tempCompositeList = mutableListOf(composite)
+                    var solved = false
                     
-                    var divisor: BigInteger? = SDIMath.qmfgSpectralSplit(currentComp)
-                    if (divisor == null) {
-                        divisor = SDIMath.fermatSplit(currentComp)
-                    }
-                    if (divisor == null) {
-                        divisor = SDIMath.pollardRhoBrentSplit(currentComp)
-                    }
-                    if (divisor == null) {
-                        divisor = SDIMath.ecmSplit(currentComp)
-                    }
-                    if (divisor == null) {
-                        divisor = SDIMath.pollardRhoSplit(currentComp)
-                    }
-                    
-                    if (divisor == null) {
-                        // AI Fallback with retries
-                        var aiResolved = GeminiClient.factorizeWithGemini(currentComp)
-                        if (aiResolved != null && aiResolved.first.multiply(aiResolved.second) == currentComp && aiResolved.first > BigInteger.ONE && aiResolved.second > BigInteger.ONE) {
-                            divisor = aiResolved.first
-                        } else {
-                            for (retry in 1..2) {
-                                aiResolved = GeminiClient.factorizeWithGemini(currentComp)
-                                if (aiResolved != null && aiResolved.first.multiply(aiResolved.second) == currentComp && aiResolved.first > BigInteger.ONE && aiResolved.second > BigInteger.ONE) {
-                                    divisor = aiResolved.first
-                                    break
+                    while (tempCompositeList.isNotEmpty()) {
+                        val currentComp = tempCompositeList.removeAt(0)
+                        if (currentComp.isProbablePrime(30)) continue
+                        
+                        var divisor: BigInteger? = SDIMath.qmfgSpectralSplit(currentComp)
+                        if (divisor == null) {
+                            divisor = SDIMath.fermatSplit(currentComp)
+                        }
+                        if (divisor == null) {
+                            divisor = SDIMath.pollardRhoBrentSplit(currentComp)
+                        }
+                        if (divisor == null) {
+                            divisor = SDIMath.ecmSplit(currentComp)
+                        }
+                        if (divisor == null) {
+                            divisor = SDIMath.pollardRhoSplit(currentComp)
+                        }
+                        
+                        if (divisor == null) {
+                            // AI Fallback with retries
+                            var aiResolved = GeminiClient.factorizeWithGemini(currentComp)
+                            if (aiResolved != null && aiResolved.first.multiply(aiResolved.second) == currentComp && aiResolved.first > BigInteger.ONE && aiResolved.second > BigInteger.ONE) {
+                                divisor = aiResolved.first
+                            } else {
+                                for (retry in 1..2) {
+                                    aiResolved = GeminiClient.factorizeWithGemini(currentComp)
+                                    if (aiResolved != null && aiResolved.first.multiply(aiResolved.second) == currentComp && aiResolved.first > BigInteger.ONE && aiResolved.second > BigInteger.ONE) {
+                                        divisor = aiResolved.first
+                                        break
+                                    }
                                 }
                             }
                         }
-                    }
 
-                    if (divisor == null) {
-                        divisor = SDIMath.deepPollardRhoSplit(currentComp)
-                    }
-                    if (divisor == null) {
-                        divisor = SDIMath.deepTrialDivisionSplit(currentComp)
-                    }
-                    
-                    if (divisor != null && divisor != BigInteger.ONE && divisor != currentComp) {
-                        val p1 = divisor
-                        val p2 = currentComp.divide(divisor)
-                        SDIMath.registerDynamicFactorization(currentComp, p1, p2)
-                        solvedAny = true
-                        tempCompositeList.add(p1)
-                        tempCompositeList.add(p2)
-                    } else {
-                        // Exhaustive brute-force odd search fallback
-                        var fallbackDivisor: BigInteger? = null
-                        var testD = BigInteger.valueOf(3L)
-                        while (testD * testD <= currentComp) {
-                            if (currentComp.remainder(testD) == BigInteger.ZERO) {
-                                fallbackDivisor = testD
-                                break
-                            }
-                            testD = testD.add(SDIMath.TWO)
+                        if (divisor == null) {
+                            divisor = SDIMath.deepPollardRhoSplit(currentComp)
                         }
-                        if (fallbackDivisor != null) {
-                            val p1 = fallbackDivisor
-                            val p2 = currentComp.divide(fallbackDivisor)
+                        if (divisor == null) {
+                            divisor = SDIMath.deepTrialDivisionSplit(currentComp)
+                        }
+                        
+                        if (divisor != null && divisor != BigInteger.ONE && divisor != currentComp) {
+                            val p1 = divisor
+                            val p2 = currentComp.divide(divisor)
                             SDIMath.registerDynamicFactorization(currentComp, p1, p2)
-                            solvedAny = true
+                            solved = true
                             tempCompositeList.add(p1)
                             tempCompositeList.add(p2)
+                        } else {
+                            // Exhaustive brute-force odd search fallback
+                            var fallbackDivisor: BigInteger? = null
+                            var testD = BigInteger.valueOf(3L)
+                            var testCount = 0
+                            while (testD * testD <= currentComp && testCount < 50000) {
+                                if (currentComp.remainder(testD) == BigInteger.ZERO) {
+                                    fallbackDivisor = testD
+                                    break
+                                }
+                                testD = testD.add(SDIMath.TWO)
+                                testCount++
+                            }
+                            if (fallbackDivisor != null) {
+                                val p1 = fallbackDivisor
+                                val p2 = currentComp.divide(fallbackDivisor)
+                                SDIMath.registerDynamicFactorization(currentComp, p1, p2)
+                                solved = true
+                                tempCompositeList.add(p1)
+                                tempCompositeList.add(p2)
+                            }
                         }
                     }
+                    solved
                 }
                 
                 if (solvedAny) {
-                    val updatedFactors = SDIMath.factorise(inputNVal)
+                    val (updatedFactors, mepa) = withContext(Dispatchers.Default) {
+                        val currentF = SDIMath.factorise(inputNVal)
+                        val computedMepa = SDIMath.computeMepaDiagnostics(currentF)
+                        Pair(currentF, computedMepa)
+                    }
                     val factorsStr = SDIMath.factorsToString(updatedFactors)
-                    val mepa = SDIMath.computeMepaDiagnostics(updatedFactors)
                     
                     val academicReport = GeminiClient.generateAcademicAnalysis(
                         valueN = inputNVal,
