@@ -143,6 +143,12 @@ class SpectralViewModel(application: Application) : AndroidViewModel(application
                             divisor = SDIMath.deepPollardRhoSplit(compositeFactor)
                         }
                         if (divisor == null) {
+                            divisor = SDIMath.qrmMatrixResonanceSplit(compositeFactor, maxSteps = 80000)
+                        }
+                        if (divisor == null) {
+                            divisor = SDIMath.qrmDualFactorSplit(compositeFactor, maxSteps = 100000)
+                        }
+                        if (divisor == null) {
                             divisor = SDIMath.deepTrialDivisionSplit(compositeFactor)
                         }
 
@@ -286,6 +292,12 @@ class SpectralViewModel(application: Application) : AndroidViewModel(application
 
                         if (divisor == null) {
                             divisor = SDIMath.deepPollardRhoSplit(currentComp)
+                        }
+                        if (divisor == null) {
+                            divisor = SDIMath.qrmMatrixResonanceSplit(currentComp, maxSteps = 80000)
+                        }
+                        if (divisor == null) {
+                            divisor = SDIMath.qrmDualFactorSplit(currentComp, maxSteps = 100000)
                         }
                         if (divisor == null) {
                             divisor = SDIMath.deepTrialDivisionSplit(currentComp)

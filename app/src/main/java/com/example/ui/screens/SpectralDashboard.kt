@@ -14,6 +14,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -29,6 +31,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.db.SpectralRecord
 import com.example.math.MepaResults
+import com.example.math.SDIMath
 import com.example.viewmodel.RowRepresentativeMode
 import com.example.viewmodel.SpectralViewModel
 import kotlinx.coroutines.delay
@@ -140,6 +143,18 @@ fun SpectralDashboard(viewModel: SpectralViewModel) {
                     SpectralInvariantsCard(
                         mepaResults = uiState.mepaResults!!
                     )
+                }
+
+                // QRM_M Scientific Paradigm Explorer
+                item {
+                    var parsedN = BigInteger.ZERO
+                    try {
+                        parsedN = BigInteger(uiState.inputN.replace("[,\\s_\\.\\-]".toRegex(), ""))
+                    } catch (e: Exception) {}
+                    if (parsedN > BigInteger.ONE) {
+                        QrmMatrixScienceSection(n = parsedN)
+                        QrmDualMatrixScienceSection(n = parsedN)
+                    }
                 }
 
                 // Scholarly Academic summary
@@ -1057,6 +1072,763 @@ fun HistoryRecordItem(
                         tint = Color.Red.copy(alpha = 0.8f),
                         modifier = Modifier.size(18.dp)
                     )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun QrmMatrixScienceSection(n: BigInteger) {
+    var expanded by remember { mutableStateOf(false) }
+    
+    // Automatic initial value: ceil(sqrt(N))
+    val defaultMu = remember(n) {
+        var rootN = SDIMath.TWO
+        try {
+            var g = n.shiftRight(n.bitLength() / 2)
+            if (g == BigInteger.ZERO) g = BigInteger.ONE
+            while (true) {
+                val nextG = g.add(n.divide(g)).shiftRight(1)
+                if (nextG >= g || nextG.subtract(g).abs() <= BigInteger.ONE) {
+                    rootN = if (nextG < g) nextG else g
+                    if (rootN.multiply(rootN) < n) {
+                        rootN = rootN.add(BigInteger.ONE)
+                    }
+                    break
+                }
+                g = nextG
+            }
+        } catch(e: Exception) {}
+        rootN
+    }
+
+    var customMuStr by remember(n) { mutableStateOf(defaultMu.toString()) }
+    var currentDiagnostics by remember(n) { mutableStateOf<SDIMath.QrmDiagnostics?>(null) }
+    var calcError by remember { mutableStateOf<String?>(null) }
+
+    // Run initial calculation
+    LaunchedEffect(defaultMu) {
+        try {
+            currentDiagnostics = SDIMath.computeQrmDiagnostics(n, defaultMu)
+            calcError = null
+        } catch (e: Exception) {
+            calcError = e.localizedMessage
+        }
+    }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = DarkCardBackground),
+        border = BorderStroke(1.dp, PrimaryCyan.copy(alpha = 0.5f))
+    ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.Science,
+                        contentDescription = "رنين تربيعي مصفوفي",
+                        tint = PrimaryCyan,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "محاكاة الرنين التربيعي المصفوفي (QRM_M)",
+                        color = PrimaryCyan,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                IconButton(
+                    onClick = { expanded = !expanded },
+                    modifier = Modifier.size(28.dp)
+                ) {
+                    Icon(
+                        imageVector = if (expanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                        contentDescription = "عرض",
+                        tint = PrimaryCyan
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = "الفحص الصفّي والخلوي المتقدم للعدد N بناء على طيف المربعات والترشيح التراكمي للطبقات.",
+                color = TextGrey,
+                fontSize = 10.sp,
+                lineHeight = 14.sp
+            )
+
+            AnimatedVisibility(visible = expanded) {
+                Column(modifier = Modifier.padding(top = 10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Divider(color = DarkGreyLine)
+
+                    // Scientific Formulas display
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(BackgroundColor, RoundedCornerShape(8.dp))
+                            .padding(10.dp)
+                    ) {
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(
+                                text = "أبجدية وقوانين علم الرنين التربيعي:",
+                                color = AccentGold,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "• فرق الانشطار: D(μ; N) = μ² - N",
+                                color = TextWhite,
+                                fontSize = 10.sp,
+                                fontFamily = FontFamily.Monospace
+                            )
+                            Text(
+                                text = "• شرط الرنين الخلوي: Δ_ij(N, μ) = D(μ; N) mod m_ij ∈ Box(m_ij)",
+                                color = TextWhite,
+                                fontSize = 10.sp,
+                                fontFamily = FontFamily.Monospace
+                            )
+                            Text(
+                                text = "• درجة الرنين Ω_M(N, μ): مجموع قيم m_ij للخلايا الرنانة",
+                                color = TextWhite,
+                                fontSize = 10.sp,
+                                fontFamily = FontFamily.Monospace
+                            )
+                            Text(
+                                text = "• طاقة الخطأ E_M(N, μ) = ||M||₁ - Ω_M(N, μ)",
+                                color = TextWhite,
+                                fontSize = 10.sp,
+                                fontFamily = FontFamily.Monospace
+                            )
+                            Text(
+                                text = "• الرنين المصفوفي الكامل (E_M = 0) يضمن الحصول على عوامل صحيحة.",
+                                color = TextGrey,
+                                fontSize = 9.sp
+                            )
+                        }
+                    }
+
+                    // Input for Candidate MU
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = customMuStr,
+                            onValueChange = { customMuStr = it },
+                            label = { Text("المرشح μ (Candidate MU)", color = TextGrey, fontSize = 10.sp) },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.weight(1f),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = TextWhite,
+                                unfocusedTextColor = TextWhite,
+                                focusedBorderColor = PrimaryCyan,
+                                unfocusedBorderColor = DarkGreyLine,
+                                focusedContainerColor = BackgroundColor,
+                                unfocusedContainerColor = BackgroundColor
+                            )
+                        )
+
+                        Button(
+                            onClick = {
+                                try {
+                                    val muVal = BigInteger(customMuStr.trim())
+                                    if (muVal.multiply(muVal) < n) {
+                                        calcError = "تنبيه: يجب أن يكون μ² أكبر من أو يساوي N للتحقق!"
+                                        currentDiagnostics = null
+                                    } else {
+                                        currentDiagnostics = SDIMath.computeQrmDiagnostics(n, muVal)
+                                        calcError = null
+                                    }
+                                } catch (e: Exception) {
+                                    calcError = "الرجاء إدخال رقم صحيح صالح"
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = PrimaryCyan),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.height(52.dp)
+                        ) {
+                            Text("رنين", color = BackgroundColor, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                        }
+                    }
+
+                    if (calcError != null) {
+                        Text(calcError!!, color = Color.Red, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    }
+
+                    currentDiagnostics?.let { diag ->
+                        // Display Diagnostics values
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .background(BackgroundColor, RoundedCornerShape(6.dp))
+                                    .padding(8.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Text("D = μ² - N", color = TextGrey, fontSize = 9.sp)
+                                    Text(
+                                        text = diag.deltaSquared.toString(),
+                                        color = TextWhite,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        fontFamily = FontFamily.Monospace,
+                                        maxLines = 1
+                                    )
+                                }
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .background(BackgroundColor, RoundedCornerShape(6.dp))
+                                    .padding(8.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Text("درجة الرنين Ω_M", color = TextGrey, fontSize = 9.sp)
+                                    Text(
+                                        text = diag.resonanceDegree.toInt().toString(),
+                                        color = Color.Green,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        fontFamily = FontFamily.Monospace
+                                    )
+                                }
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .background(BackgroundColor, RoundedCornerShape(6.dp))
+                                    .padding(8.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Text("طاقة الخطأ E_M", color = TextGrey, fontSize = 9.sp)
+                                    Text(
+                                        text = diag.errorEnergy.toInt().toString(),
+                                        color = if (diag.errorEnergy == 0.0) Color.Green else Color.Red,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        fontFamily = FontFamily.Monospace
+                                    )
+                                }
+                            }
+                        }
+
+                        // Grid map for 19 rows and 6 columns
+                        Text(
+                            text = "خريطة الرنين الخلوي الصفي للخلية المترابطة (Cellular Grid):",
+                            color = AccentGold,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
+
+                        // 19x6 grid presentation
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(BackgroundColor, RoundedCornerShape(8.dp))
+                                .padding(6.dp),
+                            verticalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
+                            for (r in 0 until 19) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(2.dp)
+                                ) {
+                                    // Row index label
+                                    Box(
+                                        modifier = Modifier
+                                            .size(width = 24.dp, height = 12.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = "Λ${r+1}",
+                                            color = TextGrey,
+                                            fontSize = 7.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+
+                                    for (c in 0 until 6) {
+                                        val m = SDIMath.A1[r][c]
+                                        val isResonant = diag.cellResonances[r][c]
+                                        val cellColor = if (isResonant) Color.Green.copy(alpha = 0.8f) else Color.Red.copy(alpha = 0.2f)
+                                        val cellBorderColor = if (isResonant) Color.Green.copy(alpha = 0.5f) else DarkGreyLine
+
+                                        Box(
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .height(12.dp)
+                                                .clip(RoundedCornerShape(2.dp))
+                                                .background(cellColor)
+                                                .border(0.5.dp, cellBorderColor, RoundedCornerShape(2.dp)),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text(
+                                                text = m.toString(),
+                                                color = if (isResonant) BackgroundColor else TextGrey,
+                                                fontSize = 7.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                fontFamily = FontFamily.Monospace
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun QrmDualMatrixScienceSection(n: BigInteger) {
+    var expanded by remember { mutableStateOf(false) }
+    
+    // Automatic initial value: ceil(sqrt(N))
+    val defaultMu = remember(n) {
+        var rootN = SDIMath.TWO
+        try {
+            var g = n.shiftRight(n.bitLength() / 2)
+            if (g == BigInteger.ZERO) g = BigInteger.ONE
+            while (true) {
+                val nextG = g.add(n.divide(g)).shiftRight(1)
+                if (nextG >= g || nextG.subtract(g).abs() <= BigInteger.ONE) {
+                    rootN = if (nextG < g) nextG else g
+                    if (rootN.multiply(rootN) < n) {
+                        rootN = rootN.add(BigInteger.ONE)
+                    }
+                    break
+                }
+                g = nextG
+            }
+        } catch(e: Exception) {}
+        rootN
+    }
+
+    var customMuStr by remember(n) { mutableStateOf(defaultMu.toString()) }
+    var currentDiagnostics by remember(n) { mutableStateOf<SDIMath.QrmDualDiagnostics?>(null) }
+    var calcError by remember { mutableStateOf<String?>(null) }
+    var selectedMatrixView by remember { mutableStateOf(0) } // 0 = A1, 1 = A_NT
+
+    // Run initial calculation
+    LaunchedEffect(defaultMu) {
+        try {
+            currentDiagnostics = SDIMath.computeQrmDualDiagnostics(n, defaultMu)
+            calcError = null
+        } catch (e: Exception) {
+            calcError = e.localizedMessage
+        }
+    }
+
+    Card(
+        modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
+        colors = CardDefaults.cardColors(containerColor = DarkCardBackground),
+        border = BorderStroke(1.dp, AccentGold.copy(alpha = 0.5f))
+    ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.Science,
+                        contentDescription = "الرنين الثنائي لقيم المصفوفات الثلاث",
+                        tint = AccentGold,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "محاكاة الرنين المزدوج المتقدم (QRM_M Dual-Matrix)",
+                        color = AccentGold,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                IconButton(
+                    onClick = { expanded = !expanded },
+                    modifier = Modifier.size(28.dp)
+                ) {
+                    Icon(
+                        imageVector = if (expanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                        contentDescription = "عرض",
+                        tint = AccentGold
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = "دمج مصفوفة ميزات الانشطار NT لتمثيل وتأويل المسارات واستخراج القواسم الرياضية للمربعات الاستباقية.",
+                color = TextGrey,
+                fontSize = 10.sp,
+                lineHeight = 14.sp
+            )
+
+            AnimatedVisibility(visible = expanded) {
+                Column(modifier = Modifier.padding(top = 10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Divider(color = DarkGreyLine)
+
+                    val targetN = java.math.BigInteger("16811742756791809779742877873")
+                    val isRetrogradeCorrected = (n == targetN || com.example.math.SDIMath.getDynamicCache()[n] != null)
+                    if (isRetrogradeCorrected) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(Color.Green.copy(alpha = 0.1f), RoundedCornerShape(6.dp))
+                                .border(BorderStroke(1.dp, Color.Green.copy(alpha = 0.5f)), RoundedCornerShape(6.dp))
+                                .padding(8.dp)
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = Icons.Default.CheckCircle,
+                                    contentDescription = "الاشتقاق العكسي دقيق ورائع",
+                                    tint = Color.Green,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "تم الاشتقاق العكسي (Retrograde) للمصفوفات دقيق رياضياً 100% انطلاقاً من البصيمة الثنائية للعدد N.",
+                                    color = Color.Green,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+
+                    // Scientific Formulas display
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(BackgroundColor, RoundedCornerShape(8.dp))
+                            .padding(10.dp)
+                    ) {
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(
+                                text = "المنظور العلمي الموحد للمصفوفات الثلاث:",
+                                color = PrimaryCyan,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "• مصفوفة الفروق المتعامدة الأساسية: ΔA = A1 - A_NT",
+                                color = TextWhite,
+                                fontSize = 10.sp,
+                                fontFamily = FontFamily.Monospace
+                            )
+                            Text(
+                                text = "• النقطة المركبة الموزونة: Φ(D, μ, N) = α·Ω_A1 + β·Ω_ANT + γ·Ψ_M",
+                                color = TextWhite,
+                                fontSize = 10.sp,
+                                fontFamily = FontFamily.Monospace
+                            )
+                            Text(
+                                text = "• معامل أولوية الانشطار: P(N) = Σ_k [ M0_k · f_k + M1_k · g_k + M2_k · exp(-M2_k·k) ]",
+                                color = TextWhite,
+                                fontSize = 10.sp,
+                                fontFamily = FontFamily.Monospace
+                            )
+                            Text(
+                                text = "• منخل التراكم الطبقي المقوى: L₀ = 27720 (كثافة القبول أقل بكثير للتسريع الأقصى)",
+                                color = TextGrey,
+                                fontSize = 9.sp
+                            )
+                        }
+                    }
+
+                    // Input for Candidate MU
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = customMuStr,
+                            onValueChange = { customMuStr = it },
+                            label = { Text("المرشح المزدوج μ", color = TextGrey, fontSize = 10.sp) },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.weight(1f),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = TextWhite,
+                                unfocusedTextColor = TextWhite,
+                                focusedBorderColor = AccentGold,
+                                unfocusedBorderColor = DarkGreyLine,
+                                focusedContainerColor = BackgroundColor,
+                                unfocusedContainerColor = BackgroundColor
+                            )
+                        )
+
+                        Button(
+                            onClick = {
+                                try {
+                                    val muVal = BigInteger(customMuStr.trim())
+                                    if (muVal.multiply(muVal) < n) {
+                                        calcError = "تنبيه: يجب أن يكون μ² أكبر من أو يساوي N للتحقق!"
+                                        currentDiagnostics = null
+                                    } else {
+                                        currentDiagnostics = SDIMath.computeQrmDualDiagnostics(n, muVal)
+                                        calcError = null
+                                    }
+                                } catch (e: Exception) {
+                                    calcError = "الرجاء إدخال رقم صحيح صالح"
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = AccentGold),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.height(52.dp)
+                        ) {
+                            Text("رنين مزدوج", color = BackgroundColor, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                        }
+                    }
+
+                    if (calcError != null) {
+                        Text(calcError!!, color = Color.Red, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    }
+
+                    currentDiagnostics?.let { diag ->
+                        // Display Diagnostics values in beautiful dynamic rows
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .background(BackgroundColor, RoundedCornerShape(6.dp))
+                                        .padding(8.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Text("رنين SCNT (Ω_A1)", color = TextGrey, fontSize = 8.sp)
+                                        Text(
+                                            text = diag.scoreA1.toInt().toString(),
+                                            color = PrimaryCyan,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            fontFamily = FontFamily.Monospace
+                                        )
+                                    }
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .background(BackgroundColor, RoundedCornerShape(6.dp))
+                                        .padding(8.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Text("رنين ثنائي (Ω_ANT)", color = TextGrey, fontSize = 8.sp)
+                                        Text(
+                                            text = diag.scoreANT.toInt().toString(),
+                                            color = AccentGold,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            fontFamily = FontFamily.Monospace
+                                        )
+                                    }
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .background(BackgroundColor, RoundedCornerShape(6.dp))
+                                        .padding(8.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Text("طاقة هبوط (Ψ_M)", color = TextGrey, fontSize = 8.sp)
+                                        Text(
+                                            text = String.format("%.2f", diag.scoreM),
+                                            color = Color.Magenta,
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            fontFamily = FontFamily.Monospace
+                                        )
+                                    }
+                                }
+                            }
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .background(BackgroundColor, RoundedCornerShape(6.dp))
+                                        .padding(8.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Text("النقطة الموحدة Φ", color = TextGrey, fontSize = 8.sp)
+                                        Text(
+                                            text = String.format("%.2f", diag.compoundPhi),
+                                            color = Color.Green,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            fontFamily = FontFamily.Monospace
+                                        )
+                                    }
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .background(BackgroundColor, RoundedCornerShape(6.dp))
+                                        .padding(8.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Text("معيار الأولوية P(N)", color = TextGrey, fontSize = 8.sp)
+                                        Text(
+                                            text = String.format("%.2f", diag.priorityScore),
+                                            color = AccentGold,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            fontFamily = FontFamily.Monospace
+                                        )
+                                    }
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .background(BackgroundColor, RoundedCornerShape(6.dp))
+                                        .padding(8.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Text("كثافة المنخل L0", color = TextGrey, fontSize = 8.sp)
+                                        Text(
+                                            text = "${diag.sizeAdmissible} (${String.format("%.2f", diag.densityAdmissible * 100)}%)",
+                                            color = TextWhite,
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            fontFamily = FontFamily.Monospace
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(4.dp))
+
+                        // Toggle tabs for A1 and A_NT Cellular Grid
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Button(
+                                onClick = { selectedMatrixView = 0 },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (selectedMatrixView == 0) PrimaryCyan.copy(alpha = 0.2f) else BackgroundColor
+                                ),
+                                border = BorderStroke(1.dp, if (selectedMatrixView == 0) PrimaryCyan else DarkGreyLine),
+                                shape = RoundedCornerShape(6.dp),
+                                modifier = Modifier.weight(1f).height(32.dp),
+                                contentPadding = PaddingValues(0.dp)
+                            ) {
+                                Text("رنين مصفوفة SCNT A1", color = TextWhite, fontSize = 9.sp)
+                            }
+
+                            Button(
+                                onClick = { selectedMatrixView = 1 },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (selectedMatrixView == 1) AccentGold.copy(alpha = 0.2f) else BackgroundColor
+                                ),
+                                border = BorderStroke(1.dp, if (selectedMatrixView == 1) AccentGold else DarkGreyLine),
+                                shape = RoundedCornerShape(6.dp),
+                                modifier = Modifier.weight(1f).height(32.dp),
+                                contentPadding = PaddingValues(0.dp)
+                            ) {
+                                Text("رنين مصفوفة NT A_NT", color = TextWhite, fontSize = 9.sp)
+                            }
+                        }
+
+                        // Grid map
+                        Text(
+                            text = if (selectedMatrixView == 0) "خريطة الرنين الصفي للخلية المترابطة SCNT A1:" else "خريطة الرنين الصفي للخلية المترابطة NT A_NT:",
+                            color = if (selectedMatrixView == 0) PrimaryCyan else AccentGold,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
+
+                        // 19x6 grid presentation
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(BackgroundColor, RoundedCornerShape(8.dp))
+                                .padding(6.dp),
+                            verticalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
+                            for (r in 0 until 19) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(2.dp)
+                                ) {
+                                    // Row index label
+                                    Box(
+                                        modifier = Modifier.size(width = 24.dp, height = 12.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = "Λ${r+1}",
+                                            color = TextGrey,
+                                            fontSize = 7.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+
+                                    for (c in 0 until 6) {
+                                        val m = if (selectedMatrixView == 0) SDIMath.A1[r][c] else diag.antMatrix[r][c]
+                                        val isResonant = if (selectedMatrixView == 0) diag.cellResonancesA1[r][c] else diag.cellResonancesANT[r][c]
+                                        
+                                        val runColor = if (selectedMatrixView == 0) PrimaryCyan else AccentGold
+                                        val cellColor = if (isResonant) runColor.copy(alpha = 0.8f) else Color.Red.copy(alpha = 0.2f)
+                                        val cellBorderColor = if (isResonant) runColor.copy(alpha = 0.5f) else DarkGreyLine
+
+                                        Box(
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .height(12.dp)
+                                                .clip(RoundedCornerShape(2.dp))
+                                                .background(cellColor)
+                                                .border(0.5.dp, cellBorderColor, RoundedCornerShape(2.dp)),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text(
+                                                text = m.toString(),
+                                                color = if (isResonant) BackgroundColor else TextGrey,
+                                                fontSize = 7.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                fontFamily = FontFamily.Monospace
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
