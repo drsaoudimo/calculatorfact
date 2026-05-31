@@ -102,29 +102,49 @@ class SpectralViewModel(application: Application) : AndroidViewModel(application
                 // 1. Initial High-speed prime factorization
                 var factors = SDIMath.factorise(nVal)
 
-                // 2. Continuous Decomposer for non-prime limits / composite factors ("عند اكتشاف حد غير اولي الرجاء الاستمرار في تحليله")
-                var hasComposite = factors.keys.any { !it.isProbablePrime(25) }
-                var aiDecomposeAttempts = 0
-                val maxAttempts = 5 // safety cap
+                // 2. Continuous Decomposer for non-prime limits / composite factors
+                var hasComposite = factors.keys.any { !it.isProbablePrime(30) }
+                var decomposeAttempts = 0
+                val maxAttempts = 15 // robust safety cap to resolve even nested composite levels
 
-                while (hasComposite && aiDecomposeAttempts < maxAttempts) {
-                    aiDecomposeAttempts++
+                while (hasComposite && decomposeAttempts < maxAttempts) {
+                    decomposeAttempts++
                     // Identify the non-prime factor
-                    val compositeFactor = factors.keys.first { !it.isProbablePrime(25) }
+                    val compositeFactor = factors.keys.first { !it.isProbablePrime(30) }
                     
-                    // Utilize Gemini to break down this composite sub-factor
-                    val aiResolvedFactors = GeminiClient.factorizeWithGemini(compositeFactor)
-                    if (aiResolvedFactors != null) {
-                        val (p1, p2) = aiResolvedFactors
+                    // A. Try high-performance local mathematical splitters first
+                    var divisor: BigInteger? = SDIMath.fermatSplit(compositeFactor)
+                    if (divisor == null) {
+                        divisor = SDIMath.pollardRhoBrentSplit(compositeFactor)
+                    }
+                    if (divisor == null) {
+                        divisor = SDIMath.ecmSplit(compositeFactor)
+                    }
+                    if (divisor == null) {
+                        divisor = SDIMath.pollardRhoSplit(compositeFactor)
+                    }
+
+                    if (divisor != null && divisor != BigInteger.ONE && divisor != compositeFactor) {
+                        val p1 = divisor
+                        val p2 = compositeFactor.divide(divisor)
                         SDIMath.registerDynamicFactorization(compositeFactor, p1, p2)
-                        
-                        // Recalculate whole product factors with newly discovered sub-factors
                         factors = SDIMath.factorise(nVal)
                     } else {
-                        // AI could not break this limit down; log error or break retry loop
-                        break
+                        // B. Fallback to advanced AI factorization
+                        val aiResolvedFactors = GeminiClient.factorizeWithGemini(compositeFactor)
+                        if (aiResolvedFactors != null) {
+                            val (p1, p2) = aiResolvedFactors
+                            if (p1.multiply(p2) == compositeFactor && p1 > BigInteger.ONE && p2 > BigInteger.ONE) {
+                                SDIMath.registerDynamicFactorization(compositeFactor, p1, p2)
+                                factors = SDIMath.factorise(nVal)
+                            } else {
+                                break
+                            }
+                        } else {
+                            break
+                        }
                     }
-                    hasComposite = factors.keys.any { !it.isProbablePrime(25) }
+                    hasComposite = factors.keys.any { !it.isProbablePrime(30) }
                 }
 
                 val factorsStr = SDIMath.factorsToString(factors)
@@ -179,6 +199,117 @@ class SpectralViewModel(application: Application) : AndroidViewModel(application
                     it.copy(
                         isLoading = false,
                         error = "حدث خطأ غير متوقع: ${e.localizedMessage}"
+                    )
+                }
+            }
+        }
+    }
+
+    /**
+     * Continuous mathematical and AI analysis to decompose discovered composite elements:
+     * - Runs Fermat check
+     * - Runs Pollard's Rho Brent cycle-detection
+     * - Runs Lenstra ECM curve multiplication
+     * - Calls Gemini API as an intelligent spectral solver fallback
+     * - Updates the factorization bounds and cascades to update MEPA diagnostics & Room record.
+     */
+    fun decomposeCompositeFactor(composite: BigInteger) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoading = true, error = null) }
+            try {
+                val inputNVal = BigInteger(sanitizeInput(_uiState.value.inputN))
+                
+                // Keep decomposing until this sub-tree has no composite factors left
+                val tempCompositeList = mutableListOf(composite)
+                var solvedAny = false
+                
+                while (tempCompositeList.isNotEmpty()) {
+                    val currentComp = tempCompositeList.removeAt(0)
+                    if (currentComp.isProbablePrime(30)) continue
+                    
+                    var divisor = SDIMath.fermatSplit(currentComp)
+                    if (divisor == null) {
+                        divisor = SDIMath.pollardRhoBrentSplit(currentComp)
+                    }
+                    if (divisor == null) {
+                        divisor = SDIMath.ecmSplit(currentComp)
+                    }
+                    if (divisor == null) {
+                        divisor = SDIMath.pollardRhoSplit(currentComp)
+                    }
+                    
+                    if (divisor != null && divisor != BigInteger.ONE && divisor != currentComp) {
+                        val p1 = divisor
+                        val p2 = currentComp.divide(divisor)
+                        SDIMath.registerDynamicFactorization(currentComp, p1, p2)
+                        solvedAny = true
+                        tempCompositeList.add(p1)
+                        tempCompositeList.add(p2)
+                    } else {
+                        val aiResolved = GeminiClient.factorizeWithGemini(currentComp)
+                        if (aiResolved != null) {
+                            val (p1, p2) = aiResolved
+                            if (p1.multiply(p2) == currentComp && p1 > BigInteger.ONE && p2 > BigInteger.ONE) {
+                                SDIMath.registerDynamicFactorization(currentComp, p1, p2)
+                                solvedAny = true
+                                tempCompositeList.add(p1)
+                                tempCompositeList.add(p2)
+                            }
+                        }
+                    }
+                }
+                
+                if (solvedAny) {
+                    val updatedFactors = SDIMath.factorise(inputNVal)
+                    val factorsStr = SDIMath.factorsToString(updatedFactors)
+                    val mepa = SDIMath.computeMepaDiagnostics(updatedFactors)
+                    
+                    val academicReport = GeminiClient.generateAcademicAnalysis(
+                        valueN = inputNVal,
+                        factorsText = factorsStr,
+                        determinant = mepa.relationMatrix.firstOrNull()?.sum() ?: 0.0,
+                        frobeniusNorm = mepa.frobeniusNorm,
+                        b0 = mepa.betti0,
+                        b1 = mepa.betti1,
+                        b2 = mepa.betti2
+                    )
+
+                    _uiState.update {
+                        it.copy(
+                            isLoading = false,
+                            factors = updatedFactors,
+                            factorsText = factorsStr,
+                            mepaResults = mepa,
+                            academicReport = academicReport
+                        )
+                    }
+                    
+                    // Save update to offline record db
+                    repository.insert(
+                        SpectralRecord(
+                            inputN = inputNVal.toString(),
+                            factorsText = factorsStr,
+                            frobeniusNorm = mepa.frobeniusNorm,
+                            dimension = mepa.dimension,
+                            betti0 = mepa.betti0,
+                            betti1 = mepa.betti1,
+                            betti2 = mepa.betti2,
+                            academicBriefing = academicReport
+                        )
+                    )
+                } else {
+                    _uiState.update {
+                        it.copy(
+                            isLoading = false,
+                            error = "تعذر تفكيك الحد $composite بالخوارزميات المدمجة حالياً. جرب مع مقادير أخرى كالمطابقة اليدوية."
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(
+                        isLoading = false,
+                        error = "خطأ في تفكيك الحد المركب: ${e.localizedMessage}"
                     )
                 }
             }

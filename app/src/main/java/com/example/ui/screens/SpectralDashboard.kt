@@ -122,8 +122,7 @@ fun SpectralDashboard(viewModel: SpectralViewModel) {
                         factorsText = uiState.factorsText,
                         factorsMap = uiState.factors,
                         onDecomposeFactor = { fac -> 
-                            // When composite sub-factors exist, trigger decompose manually or automatically
-                            viewModel.registerManualFactors(uiState.inputN, fac.toString(), "1") 
+                            viewModel.decomposeCompositeFactor(fac) 
                         }
                     )
                 }
