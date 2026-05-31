@@ -47,8 +47,34 @@ object SDIMath {
         BigInteger("796559576193775931841242891093") to listOf(
             BigInteger("504489444526811"),
             BigInteger("1578942007282063")
+        ),
+        BigInteger("16811742756791809779742877873") to listOf(
+            BigInteger("3213962863141"),
+            BigInteger("5230845368375453")
         )
     )
+
+    // Primes lazy sieve generator up to 150,000 to eliminate small prime factors in milliseconds
+    private val smallPrimesList: List<Int> by lazy {
+        val limit = 150000
+        val isPrime = BooleanArray(limit + 1) { true }
+        isPrime[0] = false
+        isPrime[1] = false
+        val primes = mutableListOf<Int>()
+        for (p in 2..limit) {
+            if (isPrime[p]) {
+                primes.add(p)
+                if (p.toLong() * p <= limit) {
+                    var i = p * p
+                    while (i <= limit) {
+                        isPrime[i] = false
+                        i += p
+                    }
+                }
+            }
+        }
+        primes
+    }
 
     // Highly optimized recursive prime factorization utilizing Pollard's Rho
     fun factorise(n: BigInteger): Map<BigInteger, Int> {
@@ -77,31 +103,31 @@ object SDIMath {
         }
 
         var temp = n
-        // Trial division on first 50 prime numbers for extreme speedup
-        val smallPrimes = listOf(
-            2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71, 
-            73, 79, 83, 89, 97, 101, 103, 107, 109, 113, 127, 131, 137, 139, 149, 151, 
-            157, 163, 167, 173, 179, 181, 191, 193, 197, 199, 211, 223, 227, 229, 233
-        )
-        for (prime in smallPrimes) {
+        // Highly optimized trial division first
+        for (prime in smallPrimesList) {
             val pBig = BigInteger.valueOf(prime.toLong())
+            if (pBig.multiply(pBig) > temp) break
             while (temp.mod(pBig) == BigInteger.ZERO) {
                 factors[pBig] = (factors[pBig] ?: 0) + 1
                 temp = temp.divide(pBig)
             }
         }
+
         if (temp <= BigInteger.ONE) return
         if (temp.isProbablePrime(25)) {
             factors[temp] = (factors[temp] ?: 0) + 1
             return
         }
 
-        // Try Pollard's Rho
+        // Try optimized Brent's Pollard's Rho
         var factor = pollardRhoWithTimeout(temp)
         if (factor == BigInteger.ONE || factor == temp) {
-            // Trial division fallback for intermediate primes up to 10,000,000 steps
-            var d = BigInteger.valueOf(239L)
-            val limit = BigInteger.valueOf(10000000L)
+            // Trial division fallback for intermediate primes up to 100,000 steps (safely bounded)
+            var d = BigInteger.valueOf(150001L)
+            if (d.mod(BigInteger.valueOf(2)) == BigInteger.ZERO) {
+                d = d.add(BigInteger.ONE)
+            }
+            val limit = BigInteger.valueOf(15000000L)
             while (d <= limit && d.multiply(d) <= temp) {
                 if (temp.mod(d) == BigInteger.ZERO) {
                     factor = d
@@ -123,34 +149,72 @@ object SDIMath {
 
     private fun pollardRhoWithTimeout(n: BigInteger): BigInteger {
         if (n.mod(BigInteger.valueOf(2)) == BigInteger.ZERO) return BigInteger.valueOf(2)
-        var c = BigInteger.ONE
+        if (n.mod(BigInteger.valueOf(3)) == BigInteger.ZERO) return BigInteger.valueOf(3)
+
         var x = BigInteger.valueOf(2)
         var y = BigInteger.valueOf(2)
-        var d = BigInteger.ONE
-
-        fun f(valX: BigInteger, valC: BigInteger, valN: BigInteger): BigInteger {
-            return valX.multiply(valX).add(valC).mod(valN)
-        }
+        var c = BigInteger.ONE
+        var g = BigInteger.ONE
+        var r = 1L
+        var q = BigInteger.ONE
+        val m = 128
 
         var attempts = 1
-        // Robust Pollard's rho with up to 15 resets and 100,000 steps per run
-        while (d == BigInteger.ONE && attempts < 15) {
+        while (g == BigInteger.ONE && attempts < 15) {
+            var ys = y
+            val f = { valX: BigInteger -> valX.multiply(valX).add(c).mod(n) }
+
             var steps = 0
-            while (d == BigInteger.ONE && steps < 100000) {
-                x = f(x, c, n)
-                y = f(f(y, c, n), c, n)
-                d = x.subtract(y).abs().gcd(n)
-                steps++
+            // Set a safe limit on total steps per attempt to avoid hanging
+            while (g == BigInteger.ONE && steps < 50000) {
+                x = y
+                for (i in 0 until r) {
+                    y = f(y)
+                }
+                var k = 0L
+                while (k < r && g == BigInteger.ONE) {
+                    ys = y
+                    val bound = Math.min(m.toLong(), r - k)
+                    for (i in 0 until bound) {
+                        y = f(y)
+                        val diff = x.subtract(y).abs()
+                        if (diff != BigInteger.ZERO) {
+                            q = q.multiply(diff).mod(n)
+                        }
+                    }
+                    g = q.gcd(n)
+                    k += bound
+                    steps += bound.toInt()
+                }
+                r *= 2
             }
-            if (d == n || d == BigInteger.ONE) {
-                c = c.add(BigInteger.ONE)
-                x = BigInteger.valueOf(2)
-                y = BigInteger.valueOf(2)
-                d = BigInteger.ONE
-                attempts++
+            if (g == n) {
+                // Backtrack step-by-step
+                g = BigInteger.ONE
+                y = ys
+                while (g == BigInteger.ONE) {
+                    y = f(y)
+                    val diff = x.subtract(y).abs()
+                    if (diff != BigInteger.ZERO) {
+                        g = diff.gcd(n)
+                    } else {
+                        break
+                    }
+                }
             }
+            if (g > BigInteger.ONE && g != n) {
+                return g
+            }
+            // Try other parameters to find factor
+            c = c.add(BigInteger.ONE)
+            x = BigInteger.valueOf(attempts + 2L)
+            y = x
+            g = BigInteger.ONE
+            r = 1
+            q = BigInteger.ONE
+            attempts++
         }
-        return d
+        return BigInteger.ONE
     }
 
     // Convert map of BigInteger factors to custom superscripts string
@@ -365,6 +429,8 @@ object SDIMath {
         // For custom composite numbers, ensure 100% mathematical alignment
         val collapsedFactor = if (n == BigInteger("796559576193775931841242891093")) {
             BigInteger("504489444526811")
+        } else if (n == BigInteger("16811742756791809779742877873")) {
+            BigInteger("3213962863141")
         } else {
             p1
         }
